@@ -56,7 +56,7 @@ class EngineTest {
         assertEquals(1, outcomes.size)
         val created = outcomes[0] as EvalOutcome.TicketCreated
         assertEquals(Strength.Explicit, created.ticket.mandate.strength)
-        assertEquals("addressed", created.ticket.mandate.basis)
+        assertEquals("allowed_address", created.ticket.mandate.basis)
         assertEquals("p1", created.ticket.mandate.policyVersion)
         assertEquals(AssignmentStatus.Pending, created.assignment.status)
         val state = store.load()
@@ -114,9 +114,9 @@ class EngineTest {
         val state = store.load()
         val decision = state.decisions.getValue("a")
         assertTrue(decision is Decision.Ignore)
-        assertEquals("not_admitted:not_admitted", decision.reason)
+        assertEquals("not_admitted:table_unlisted_unaddressed", decision.reason)
         val disposition = state.dispositions.getValue("a")
-        assertEquals("not_admitted:not_admitted", disposition.filtered)
+        assertEquals("not_admitted:table_unlisted_unaddressed", disposition.filtered)
         assertEquals("a", disposition.decisionId)
         assertTrue(!disposition.requeued)
     }
@@ -396,7 +396,7 @@ class EngineTest {
 
         val created = outcome as EvalOutcome.TicketCreated
         assertEquals(Strength.Explicit, created.ticket.mandate.strength)
-        assertEquals("addressed", created.ticket.mandate.basis)
+        assertEquals("allowed_address", created.ticket.mandate.basis)
     }
 
     @Test
@@ -408,7 +408,7 @@ class EngineTest {
 
         val created = outcome as EvalOutcome.TicketCreated
         assertEquals(Strength.Inferred, created.ticket.mandate.strength)
-        assertEquals("addressed", created.ticket.mandate.basis)
+        assertEquals("unknown_address", created.ticket.mandate.basis)
     }
 
     @Test

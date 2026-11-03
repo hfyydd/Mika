@@ -151,13 +151,22 @@ class Engine(
                 else -> GateResult(Strength.None, "bot_not_admitted")
             }
         }
-        return when {
-            allowed && trigger.addressed -> GateResult(Strength.Explicit, "addressed")
-            allowed && threadHasTickets -> GateResult(Strength.Explicit, "followup")
-            allowed -> GateResult(Strength.Inferred, "admission")
-            trigger.addressed && trigger.isPerson -> GateResult(Strength.Inferred, "addressed")
-            trigger.addressed -> GateResult(Strength.Inferred, "bot")
-            else -> GateResult(Strength.None, "not_admitted")
+
+        val identity = when {
+            trigger.actor.isBlank() -> Identity.Unknown
+            allowed -> Identity.Allowed
+            else -> Identity.Unlisted
+        }
+        val targeting = when {
+            trigger.addressed -> Targeting.Address
+            threadHasTickets -> Targeting.Followup
+            else -> Targeting.Unaddressed
+        }
+        val table = policy.admissionTable(trigger.source.instance)
+        return when (table.cell(identity, targeting)) {
+            AdmissionCell.Explicit -> GateResult(Strength.Explicit, "${identity.name.lowercase()}_${targeting.name.lowercase()}")
+            AdmissionCell.Inferred -> GateResult(Strength.Inferred, "${identity.name.lowercase()}_${targeting.name.lowercase()}")
+            AdmissionCell.Ignore -> GateResult(Strength.None, "table_${identity.name.lowercase()}_${targeting.name.lowercase()}")
         }
     }
 

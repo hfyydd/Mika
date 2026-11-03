@@ -206,6 +206,8 @@ data class Policy(
     val acceptMode: AcceptMode = AcceptMode.Off,
     /** source instance → 允许发起工作的人(来源自己的身份口径)。 */
     val allowedActors: Map<String, List<String>> = emptyMap(),
+    /** source instance → scope → 准入表;scope 用 `*` 作 fallback。 */
+    val admissionTables: Map<String, Map<String, AdmissionTable>> = emptyMap(),
 ) {
     fun allows(sourceInstance: String, actor: String) = allowedActors[sourceInstance]?.contains(actor) == true
 }
