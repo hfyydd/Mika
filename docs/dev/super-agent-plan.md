@@ -9,6 +9,10 @@
 - [x] 领域骨架:`core/superagent/`(Domain/Engine/Router/Ports/Runner/Store),20 个测试
 - [x] 定位与架构文档、上游同步流程(已验证 v0.1.34 合并)
 - [x] autonomy 包(冻结待并入,见 2.5)
+- [x] Phase 1 领域规则与回放评测(M1 域层完成)
+- [x] core Runtime:崩溃恢复、持久副作用队列、看门狗派发、Telegram 收发适配、原路回信模型
+- [x] Routine Ticket 桥:旧 Goal 状态映射到票状态,不再开第二条执行链
+- [ ] Android 装配:尚未把 Runtime 接进 MikaApp/TaskService,因此 2.1/2.3 还不能勾;继续坚持不改上游核心文件的边界
 
 ## Phase 1 领域规则补齐(纯 core,不碰 App)
 
