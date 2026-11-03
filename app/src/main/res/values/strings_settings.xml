@@ -174,4 +174,17 @@
     <string name="mcp_servers_status_fail">Connection failed: %1$s</string>
     <string name="mcp_servers_refresh_all">Test all</string>
     <string name="mcp_servers_allowlist">Allowed tools (comma separated, empty = all)</string>
+    <string name="superagent_title">Super-agent</string>
+    <string name="superagent_runtime">Runtime</string>
+    <string name="superagent_enabled">Enable super-agent</string>
+    <string name="superagent_enabled_sub">Runs long-lived work locally without external screen</string>
+    <string name="superagent_telegram">Telegram source</string>
+    <string name="superagent_telegram_sub">Optional long-poll input channel</string>
+    <string name="superagent_telegram_edit">Edit Telegram source</string>
+    <string name="superagent_instance">Instance name</string>
+    <string name="superagent_token">Bot token</string>
+    <string name="superagent_allow_from">Allowed people (comma separated)</string>
+    <string name="superagent_allow_all">Allow all group text</string>
+    <string name="superagent_allow_all_sub">Off means only mentions and private messages start work</string>
+    <string name="superagent_note">Work stays on this phone. Remote approvals stay strict, and payment is never available.</string>
 </resources>

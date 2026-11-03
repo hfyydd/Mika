@@ -60,7 +60,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** 设置里能进入的子页面;[Home] 是设置首页,[Advanced] 集中放置连接、维护和工程能力。 */
-private enum class SettingsPage { Home, Advanced, AppAccess, PhoneOps, DuringWork, Capsule, Language, Notifications, Sandbox, Recovery, SelfCheck, ComputerAccess, McpServers, Developer, RunStats }
+private enum class SettingsPage { Home, Advanced, AppAccess, PhoneOps, DuringWork, Superagent, Capsule, Language, Notifications, Sandbox, Recovery, SelfCheck, ComputerAccess, McpServers, Developer, RunStats }
 
 /**
  * 设置页:总状态卡 + 常用 / 我的数据 / 其他。高级与其他只增加一层,各子页返回来时的页面。
@@ -139,7 +139,7 @@ fun SettingsScreen(
         page = when (page) {
             SettingsPage.RunStats -> SettingsPage.Developer
             SettingsPage.SelfCheck -> SettingsPage.Recovery
-            SettingsPage.Sandbox, SettingsPage.Recovery, SettingsPage.ComputerAccess,
+            SettingsPage.Superagent, SettingsPage.Sandbox, SettingsPage.Recovery, SettingsPage.ComputerAccess,
             SettingsPage.McpServers, SettingsPage.Developer -> SettingsPage.Advanced
             else -> SettingsPage.Home
         }
@@ -155,6 +155,7 @@ fun SettingsScreen(
             onBack = onBack, onProblem = onProblem, onOpenModels = onOpenModels,
             onOpenPhoneOps = { page = SettingsPage.PhoneOps },
             onOpenAppAccess = { page = SettingsPage.AppAccess },
+            onOpenSuperagent = { page = SettingsPage.Superagent },
             onOpenDuringWork = { page = SettingsPage.DuringWork },
             capsuleMode = capsuleMode, onOpenCapsule = { page = SettingsPage.Capsule },
             onOpenNotifications = { page = SettingsPage.Notifications },
@@ -189,6 +190,7 @@ fun SettingsScreen(
         )
         SettingsPage.Language -> LanguageScreen(language, onLanguage = { AppLanguage.set(context, it) }, onBack = toHome)
         SettingsPage.Capsule -> CapsuleScreen(capsuleMode, onMode = { flags.setCapsuleMode(it); capsuleMode = it }, onBack = toHome)
+        SettingsPage.Superagent -> SuperagentScreen(onBack = toHome)
         SettingsPage.Sandbox -> SandboxScreen(onBack = toAdvanced)
         SettingsPage.Recovery -> RecoveryScreen(onBack = toAdvanced, onOpenSelfCheck = { page = SettingsPage.SelfCheck })
         SettingsPage.SelfCheck -> SelfCheckScreen(status, onBack = back)
@@ -245,6 +247,7 @@ fun SettingsContent(
     onOpenModels: () -> Unit,
     onOpenPhoneOps: () -> Unit = {},
     onOpenAppAccess: () -> Unit = {},
+    onOpenSuperagent: () -> Unit = {},
     onOpenDuringWork: () -> Unit = {},
     /** 悬浮胶囊此刻的选择,写在「悬浮胶囊」一行的右边。 */
     capsuleMode: CapsuleMode = CapsuleMode.DEFAULT,
@@ -295,6 +298,7 @@ fun SettingsContent(
                 ListRow(MikaIcons.Heart, stringResource(R.string.settings_memory_data), stringResource(R.string.settings_memory_sub), first = true, onClick = it) { RowChevron() }
             }
             ListRow(MikaIcons.Shield, stringResource(R.string.appaccess_title), stringResource(R.string.appaccess_row_sub), first = onOpenMemory == null, onClick = onOpenAppAccess) { RowChevron() }
+            ListRow(MikaIcons.Spark, stringResource(R.string.superagent_title), stringResource(R.string.superagent_enabled_sub), onClick = onOpenSuperagent) { RowChevron() }
         }
 
         GroupLabel(stringResource(R.string.settings_other))
