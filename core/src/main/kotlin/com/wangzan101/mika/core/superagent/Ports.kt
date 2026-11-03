@@ -10,8 +10,13 @@ fun interface Router {
     suspend fun assess(batch: List<Trigger>, threadSummary: String, tickets: List<Ticket>, policy: Policy): List<Decision>
 }
 
-/** Executor 的报告:结束时给结果;waiting 表示在等人(结构化字段,不从自由文本猜)。 */
-data class ExecutorReport(val result: String, val question: String = "", val outcome: String = "done")
+/** Executor 的报告;Ready 要配合 done/merged/closed 才结束票,Dropped 单独结束票。 */
+data class ExecutorReport(
+    val state: ReportState,
+    val result: String = "",
+    val question: String = "",
+    val outcome: String = "",
+)
 
 /**
  * 执行端口:Mika 本体(AgentLoop 经 TaskCenter/ChildRunHost)在这里接进来。

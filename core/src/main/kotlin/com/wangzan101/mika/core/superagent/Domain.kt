@@ -127,19 +127,40 @@ data class TriggerDisposition(
 @Serializable
 enum class AssignmentStatus { Pending, Running, Ended }
 
+/** Executor 的六态报告;等待人必须由 Waiting + question 字段算出,不从自由文本猜。 */
+@Serializable
+enum class ReportState { Progress, Waiting, Ready, Blocked, Failed, Dropped }
+
+@Serializable
+data class AssignmentReport(
+    val atMs: Long,
+    val state: ReportState,
+    val result: String = "",
+    val question: String = "",
+    val outcome: String = "",
+)
+
 /** Ticket 与一个 Executor 实例的绑定;独立于 Ticket 的生命周期,pending → running → ended。 */
 @Serializable
 data class Assignment(
     val id: String,
     val ticketId: String,
     val status: AssignmentStatus = AssignmentStatus.Pending,
+    val state: ReportState? = null,
     val startedAtMs: Long? = null,
     val endedAtMs: Long? = null,
     /** Executor 的最终报告;question 非空表示在等人。 */
     val result: String = "",
     val question: String = "",
     val outcome: String = "",
+    val reports: List<AssignmentReport> = emptyList(),
 )
+
+/** 报告驱动的票结局;stopped 由人的停止写入,Executor 不能伪造。 */
+val TicketEndOutcomes = setOf("done", "merged", "closed", "dropped", "stopped")
+
+fun waitsForPerson(assignment: Assignment) =
+    assignment.state == ReportState.Waiting && assignment.question.isNotBlank()
 
 /** Eval 对一个 Trigger 的判决;accept 创建 Ticket,attach 归给已有 Ticket,stop 停掉一个。 */
 @Serializable

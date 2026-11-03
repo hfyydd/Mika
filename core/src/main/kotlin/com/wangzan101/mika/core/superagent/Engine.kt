@@ -296,25 +296,44 @@ class Engine(
         }))
     }
 
-    /** Executor 的报告;question 非空 = 在等人,其后的人的消息恢复它,机器人消息不打扰。 */
+    /** 六态报告;Progress/Waiting 保活,Ready/Blocked/Failed/Dropped 结束本 Assignment。 */
     fun report(assignmentId: String, report: ExecutorReport) {
         val state = store.load()
         val assignment = state.assignments.firstOrNull { it.id == assignmentId } ?: return
-        store.save(state.copy(assignments = state.assignments.map {
-            if (it.id == assignmentId) it.copy(
-                status = AssignmentStatus.Ended, endedAtMs = now(),
-                result = report.result, question = report.question, outcome = report.outcome,
-            ) else it
-        }))
-        if (report.outcome == "done") {
-            store.save(store.load().let { s -> s.copy(tickets = s.tickets.map {
-                if (it.id == assignment.ticketId && it.isOpen) it.copy(
-                    status = TicketStatus.Ended,
-                    ended = TicketEnd(now(), "executor", report.result.take(200), "done"),
-                    updatedAtMs = now(),
-                ) else it
-            })})
+        val terminal = report.state in setOf(ReportState.Ready, ReportState.Blocked, ReportState.Failed, ReportState.Dropped)
+        val alive = report.state in setOf(ReportState.Progress, ReportState.Waiting)
+        val reported = assignment.copy(
+            status = when {
+                terminal -> AssignmentStatus.Ended
+                alive && assignment.status == AssignmentStatus.Pending -> AssignmentStatus.Running
+                else -> assignment.status
+            },
+            startedAtMs = assignment.startedAtMs ?: now().takeIf { alive || terminal },
+            state = report.state,
+            endedAtMs = now().takeIf { terminal },
+            result = report.result,
+            question = report.question,
+            outcome = report.outcome,
+            reports = assignment.reports + AssignmentReport(
+                atMs = now(), state = report.state, result = report.result,
+                question = report.question, outcome = report.outcome,
+            ),
+        )
+        val endOutcome = when (report.state) {
+            ReportState.Ready -> report.outcome.takeIf { it in setOf("done", "merged", "closed") }
+            ReportState.Dropped -> "dropped"
+            else -> null
         }
+        store.save(state.copy(
+            assignments = state.assignments.map { if (it.id == assignmentId) reported else it },
+            tickets = state.tickets.map { ticket ->
+                if (ticket.id == assignment.ticketId && ticket.isOpen && endOutcome != null) ticket.copy(
+                    status = TicketStatus.Ended,
+                    ended = TicketEnd(now(), "executor", report.result.take(200), endOutcome),
+                    updatedAtMs = now(),
+                ) else ticket
+            },
+        ))
     }
 
     /** 看门狗:跑超时没报告的 Assignment 记为中断,另派一个新的(Executor 靠自查恢复,不重放外部动作的凭据)。 */
@@ -326,7 +345,9 @@ class Engine(
         if (stale.isEmpty()) return emptyList()
         val retried = stale.map { Assignment(id = newId(), ticketId = it.ticketId) }
         store.save(state.copy(assignments = state.assignments.map { a ->
-            if (stale.any { it.id == a.id }) a.copy(status = AssignmentStatus.Ended, endedAtMs = now(), outcome = "interrupted")
+            if (stale.any { it.id == a.id }) a.copy(
+                status = AssignmentStatus.Ended, state = ReportState.Failed, endedAtMs = now(), outcome = "interrupted",
+            )
             else a
         } + retried))
         return retried

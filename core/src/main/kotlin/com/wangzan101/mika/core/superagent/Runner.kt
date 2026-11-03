@@ -19,7 +19,7 @@ class Runner(private val engine: Engine, private val executor: SuperExecutor) {
             engine.report(assignmentId, report)
             true
         } catch (e: Exception) {
-            engine.report(assignmentId, ExecutorReport("执行失败: ${e.message ?: e::class.simpleName}", outcome = "failed"))
+            engine.report(assignmentId, ExecutorReport(ReportState.Failed, "执行失败: ${e.message ?: e::class.simpleName}"))
             true
         }
     }

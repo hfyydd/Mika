@@ -194,7 +194,7 @@ class EngineTest {
         val ticket = (e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated).ticket
 
         // Executor 报 done → Ticket 结束;人再说话 → 恢复。
-        e.report(e.snapshot().assignments.last().id, ExecutorReport("finished", outcome = "done"))
+        e.report(e.snapshot().assignments.last().id, ExecutorReport(ReportState.Ready, "finished", outcome = "done"))
         assertEquals(TicketStatus.Ended, store.load().tickets.single { it.id == ticket.id }.status)
         e.receive(trigger("b", text = "one more tweak"))
         val revived = store.load().tickets.single { it.id == ticket.id }
@@ -288,7 +288,7 @@ class EngineTest {
         val e = engine(store, acceptRouter())
         e.receive(trigger("a"))
         val created = e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated
-        val executor = SuperExecutor { t, _ -> ExecutorReport("did ${t.title}", outcome = "done") }
+        val executor = SuperExecutor { t, _ -> ExecutorReport(ReportState.Ready, "did ${t.title}", outcome = "done") }
         val ran = Runner(e, executor).runAssignment(created.assignment.id)
         assertTrue(ran)
         val assignment = store.load().assignments.single { it.id == created.assignment.id }
@@ -308,6 +308,6 @@ class EngineTest {
         Runner(e, executor).runAssignment(created.assignment.id)
         val ticket = store.load().tickets.single { it.id == created.ticket.id }
         assertEquals(TicketStatus.Open, ticket.status)
-        assertEquals("failed", store.load().assignments.single().outcome)
+        assertEquals(ReportState.Failed, store.load().assignments.single().state)
     }
 }
