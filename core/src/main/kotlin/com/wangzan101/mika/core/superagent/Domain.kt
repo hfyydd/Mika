@@ -208,6 +208,10 @@ data class Policy(
     val allowedActors: Map<String, List<String>> = emptyMap(),
     /** source instance → scope → 准入表;scope 用 `*` 作 fallback。 */
     val admissionTables: Map<String, Map<String, AdmissionTable>> = emptyMap(),
+    /** 显式配置 false 才算停听;缺失来源保持兼容。 */
+    val activeSources: Map<String, Boolean> = emptyMap(),
+    /** source instance → 启用规则;缺失来源表示规则全部可用。 */
+    val enabledRules: Map<String, List<String>> = emptyMap(),
 ) {
     fun allows(sourceInstance: String, actor: String) = allowedActors[sourceInstance]?.contains(actor) == true
 }

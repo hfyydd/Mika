@@ -531,16 +531,13 @@ class Engine(
     }
 
     /** Policy 变更:重验每个开放 Ticket 的 Mandate,不再成立的撤销(交给人的停止去收尾,不删进行中的工作)。 */
-    fun policyChanged(next: Policy) {
+    fun policyChanged(next: Policy): List<PolicyEffect> {
         val state = store.load()
         var nextState = state.copy(tickets = state.tickets.map { ticket ->
-            val holds = when (ticket.mandate.basis) {
-                // 名单里没配这个来源时视为开放;配了就按名单重验,发起人不再被允许即撤销。
-                else -> next.allowedActors[ticket.mandate.sourceInstance]?.let { it.contains(ticket.mandate.actor) } ?: true
-            }
-            if (ticket.isOpen && !holds) ticket.copy(
+            val reason = if (ticket.isOpen) mandateRevocationReason(ticket, next) else ""
+            if (reason.isNotBlank()) ticket.copy(
                 status = TicketStatus.Ended,
-                ended = TicketEnd(now(), "policy", "mandate no longer holds under policy ${next.version}", "revoked"),
+                ended = TicketEnd(now(), "policy", reason, "revoked"),
                 updatedAtMs = now(),
             ) else ticket
         })
@@ -548,6 +545,44 @@ class Engine(
             original.isOpen && nextState.tickets.firstOrNull { it.id == original.id }?.isOpen == false
         }.map { it.id }
         store.save(revokedIds.fold(nextState) { current, ticketId -> releaseUnreadFollowups(current, ticketId) })
+        return revokedIds.map { id -> PolicyEffect(id, mandateRevocationReason(state.tickets.first { it.id == id }, next)) }
+    }
+
+    private fun mandateRevocationReason(ticket: Ticket, next: Policy): String {
+        val mandate = ticket.mandate
+        if (next.acceptMode != AcceptMode.Auto) return "mode_not_auto"
+        if (next.activeSources[mandate.sourceInstance] == false) return "source_inactive"
+        if (next.allowedActors[mandate.sourceInstance]?.contains(mandate.actor) != true) return "actor_not_allowed"
+        val enabled = next.enabledRules[mandate.sourceInstance]
+        if (mandate.matchedRule.isNotBlank() && enabled != null && mandate.matchedRule !in enabled) return "rule_disabled"
+        val cell = tableCellForMandate(mandate, next)
+        val required = when (mandate.strength) {
+            Strength.Explicit -> AdmissionCell.Explicit
+            Strength.Inferred -> AdmissionCell.Inferred
+            Strength.None -> AdmissionCell.Ignore
+        }
+        if (cellRank(cell) < cellRank(required)) return "table_weakened"
+        return ""
+    }
+
+    private fun tableCellForMandate(mandate: Mandate, policy: Policy): AdmissionCell {
+        val identity = when {
+            mandate.actor.isBlank() -> Identity.Unknown
+            policy.allows(mandate.sourceInstance, mandate.actor) -> Identity.Allowed
+            else -> Identity.Unlisted
+        }
+        val targeting = when {
+            mandate.basis.endsWith("_address") || mandate.basis == "addressed" || mandate.basis == "bot_allowlisted" -> Targeting.Address
+            mandate.basis.endsWith("_followup") || mandate.basis == "followup" -> Targeting.Followup
+            else -> Targeting.Unaddressed
+        }
+        return policy.admissionTable(mandate.sourceInstance).cell(identity, targeting)
+    }
+
+    private fun cellRank(cell: AdmissionCell) = when (cell) {
+        AdmissionCell.Ignore -> 0
+        AdmissionCell.Inferred -> 1
+        AdmissionCell.Explicit -> 2
     }
 
     /** 人的停止:撤回 Mandate;这种结束不因后续消息恢复。 */
