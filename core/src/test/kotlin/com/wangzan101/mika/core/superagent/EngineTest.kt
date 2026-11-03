@@ -2,6 +2,7 @@ package com.wangzan101.mika.core.superagent
 
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -142,6 +143,62 @@ class EngineTest {
     }
 
     @Test
+    fun `handback removes input and requeues when no ticket owns it`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+        val ticket = (e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated).ticket
+        e.receive(trigger("b", text = "out of scope", externalId = "e-b"))
+
+        assertTrue(e.handback("b", ticket.id, "outside scope"))
+        val state = store.load()
+        assertTrue(state.tickets.single().inputs.isEmpty())
+        assertEquals(listOf("b"), state.threads.single().queuedTriggerIds)
+        assertTrue(state.dispositions.getValue("b").requeued)
+
+        val e2 = Engine(store, Router { batch, _, _, _ ->
+            batch.map { Decision.Ignore(it.id, "not work after handback") }
+        }, newId = ::ids, now = { 3000 })
+        e2.evaluateDue(autoPolicy)
+        val decided = store.load().dispositions.getValue("b")
+        assertTrue(store.load().decisions.getValue("b") is Decision.Ignore)
+        assertEquals("b", decided.decisionId)
+        assertTrue(!decided.requeued)
+    }
+
+    @Test
+    fun `ack removes the unread input exactly once`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+        val ticket = (e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated).ticket
+        e.receive(trigger("b", externalId = "e-b"))
+
+        assertTrue(e.ack("b", ticket.id))
+        assertFalse(e.ack("b", ticket.id))
+        assertTrue(store.load().tickets.single().inputs.isEmpty())
+    }
+
+    @Test
+    fun `ticket completion releases unread followups but not acknowledged ones`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+        val ticket = (e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated).ticket
+        e.receive(trigger("b", externalId = "e-b"))
+        e.receive(trigger("c", externalId = "e-c"))
+        e.ack("b", ticket.id)
+        e.report(e.snapshot().assignments.single { it.ticketId == ticket.id }.id, ExecutorReport(ReportState.Ready, "done", outcome = "done"))
+
+        val state = store.load()
+        assertEquals(TicketStatus.Ended, state.tickets.single().status)
+        assertTrue(state.tickets.single().inputs.isEmpty())
+        assertEquals(listOf("c"), state.threads.single().queuedTriggerIds)
+        assertTrue(state.dispositions.getValue("c").requeued)
+        assertFalse(state.dispositions.getValue("b").requeued)
+    }
+
+    @Test
     fun `unlisted unaddressed trigger is not admitted`() = runTest {
         val store = MemorySuperagentStore()
         val e = engine(store, acceptRouter())
@@ -201,14 +258,14 @@ class EngineTest {
         assertEquals(TicketStatus.Open, revived.status)
         assertNull(revived.ended)
 
-        // 人的停止:后再说话也不恢复(消息照收,状态不动)。
+        // 人的停止:未读跟进释放回 Eval,状态不因旧输入恢复。
         e.stopTicket(ticket.id, "user cancelled")
         e.receive(trigger("c", text = "wait come back"))
         val stopped = store.load().tickets.single { it.id == ticket.id }
         assertEquals(TicketStatus.Ended, stopped.status)
         assertEquals("person", stopped.ended?.by)
-        assertEquals(1, stopped.inputs.size)
-        assertEquals(listOf("c"), store.load().threads.single { it.key == "t1" }.queuedTriggerIds)
+        assertEquals(0, stopped.inputs.size)
+        assertEquals(listOf("b", "c"), store.load().threads.single { it.key == "t1" }.queuedTriggerIds)
     }
 
     @Test

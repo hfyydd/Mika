@@ -237,9 +237,10 @@ class Engine(
                     ended = TicketEnd(now(), "person", decision.reason.ifBlank { "stopped" }, "stopped"),
                     updatedAtMs = now(),
                 )
-                current.save(decisionState(state, trigger, decision).copy(
+                val stoppedState = decisionState(state, trigger, decision).copy(
                     tickets = state.tickets.map { if (it.id == ticket.id) ended else it },
-                ))
+                )
+                current.save(releaseUnreadFollowups(stoppedState, ticket.id))
                 return EvalOutcome.TicketStopped(ended)
             }
             is Decision.Ignore -> {
@@ -266,24 +267,74 @@ class Engine(
         )
     }
 
-    /** 工人交回一条消息;同一 Ticket 只记一次,保留第一条原因作为审计依据。 */
+    /** 工人交回一条消息;无人拥有时移出旧票、重排队,最终必须得到新判决。 */
     fun handback(triggerId: String, ticketId: String, reason: String): Boolean {
         val state = store.load()
+        val trigger = state.triggers.firstOrNull { it.id == triggerId } ?: return false
         val disposition = state.dispositions[triggerId] ?: return false
         if (disposition.handbacks.any { it.ticketId == ticketId }) return false
-        val updated = disposition.copy(handbacks = disposition.handbacks + Handback(ticketId, reason, now()))
-        store.save(state.copy(dispositions = state.dispositions + (triggerId to updated)))
+        val updated = disposition.copy(
+            handbacks = disposition.handbacks + Handback(ticketId, reason, now()),
+        )
+        var next = state.copy(
+            tickets = state.tickets.map { ticket ->
+                if (ticket.id == ticketId) ticket.copy(inputs = ticket.inputs.filter { it.triggerId != triggerId })
+                else ticket
+            },
+            dispositions = state.dispositions + (triggerId to updated),
+        )
+        if (followupOwners(trigger, next.tickets, next.dispositions).isEmpty()) {
+            val handbackDisposition = updated.copy(requeued = true)
+            next = next.copy(
+                threads = next.threads.map { thread ->
+                    if (thread.key == trigger.threadKey && triggerId !in thread.queuedTriggerIds)
+                        thread.copy(queuedTriggerIds = thread.queuedTriggerIds + triggerId)
+                    else thread
+                },
+                dispositions = next.dispositions + (triggerId to handbackDisposition),
+            )
+        }
+        store.save(next)
         return true
     }
 
-    /** Executor 确认读走一条直通消息;重复 ack 幂等。 */
+    /** Executor 确认读走一条直通消息;移除未读输入,后续票结束不会再重评。 */
     fun ack(triggerId: String, ticketId: String): Boolean {
         val state = store.load()
         val disposition = state.dispositions[triggerId] ?: return false
         if (ticketId in disposition.acked) return false
         val updated = disposition.copy(acked = disposition.acked + ticketId)
-        store.save(state.copy(dispositions = state.dispositions + (triggerId to updated)))
+        store.save(state.copy(
+            tickets = state.tickets.map { ticket ->
+                if (ticket.id == ticketId) ticket.copy(inputs = ticket.inputs.filter { it.triggerId != triggerId })
+                else ticket
+            },
+            dispositions = state.dispositions + (triggerId to updated),
+        ))
         return true
+    }
+
+    /** 票结束时,还没有被 ack 的 person 跟进不能困在死票里;释放回原线程 Eval。 */
+    private fun releaseUnreadFollowups(state: SuperagentState, ticketId: String): SuperagentState {
+        val ticket = state.tickets.firstOrNull { it.id == ticketId } ?: return state
+        if (ticket.inputs.isEmpty()) return state
+        val releaseIds = ticket.inputs.map { it.triggerId }.filter { id ->
+            state.triggers.firstOrNull { it.id == id }?.isPerson == true
+        }.toSet()
+        if (releaseIds.isEmpty()) return state
+        return state.copy(
+            tickets = state.tickets.map {
+                if (it.id == ticketId) it.copy(inputs = it.inputs.filter { input -> input.triggerId !in releaseIds }) else it
+            },
+            threads = state.threads.map { thread ->
+                if (thread.key == ticket.threadKey)
+                    thread.copy(queuedTriggerIds = (thread.queuedTriggerIds + releaseIds).distinct())
+                else thread
+            },
+            dispositions = state.dispositions.mapValues { (id, disposition) ->
+                if (id in releaseIds) disposition.copy(requeued = true) else disposition
+            },
+        )
     }
 
     /** Executor 开跑;只有 Pending 能转 Running,幂等。 */
@@ -324,7 +375,7 @@ class Engine(
             ReportState.Dropped -> "dropped"
             else -> null
         }
-        store.save(state.copy(
+        val nextState = state.copy(
             assignments = state.assignments.map { if (it.id == assignmentId) reported else it },
             tickets = state.tickets.map { ticket ->
                 if (ticket.id == assignment.ticketId && ticket.isOpen && endOutcome != null) ticket.copy(
@@ -333,7 +384,8 @@ class Engine(
                     updatedAtMs = now(),
                 ) else ticket
             },
-        ))
+        )
+        store.save(if (endOutcome == null) nextState else releaseUnreadFollowups(nextState, assignment.ticketId))
     }
 
     /** 看门狗:跑超时没报告的 Assignment 记为中断,另派一个新的(Executor 靠自查恢复,不重放外部动作的凭据)。 */
@@ -356,7 +408,7 @@ class Engine(
     /** Policy 变更:重验每个开放 Ticket 的 Mandate,不再成立的撤销(交给人的停止去收尾,不删进行中的工作)。 */
     fun policyChanged(next: Policy) {
         val state = store.load()
-        store.save(state.copy(tickets = state.tickets.map { ticket ->
+        var nextState = state.copy(tickets = state.tickets.map { ticket ->
             val holds = when (ticket.mandate.basis) {
                 // 名单里没配这个来源时视为开放;配了就按名单重验,发起人不再被允许即撤销。
                 else -> next.allowedActors[ticket.mandate.sourceInstance]?.let { it.contains(ticket.mandate.actor) } ?: true
@@ -366,18 +418,23 @@ class Engine(
                 ended = TicketEnd(now(), "policy", "mandate no longer holds under policy ${next.version}", "revoked"),
                 updatedAtMs = now(),
             ) else ticket
-        }))
+        })
+        val revokedIds = state.tickets.filter { original ->
+            original.isOpen && nextState.tickets.firstOrNull { it.id == original.id }?.isOpen == false
+        }.map { it.id }
+        store.save(revokedIds.fold(nextState) { current, ticketId -> releaseUnreadFollowups(current, ticketId) })
     }
 
     /** 人的停止:撤回 Mandate;这种结束不因后续消息恢复。 */
     fun stopTicket(ticketId: String, why: String) {
         val state = store.load()
-        store.save(state.copy(tickets = state.tickets.map {
+        val nextState = state.copy(tickets = state.tickets.map {
             if (it.id == ticketId && it.isOpen) it.copy(
                 status = TicketStatus.Ended,
                 ended = TicketEnd(now(), "person", why, "stopped"),
                 updatedAtMs = now(),
             ) else it
-        }))
+        })
+        store.save(releaseUnreadFollowups(nextState, ticketId))
     }
 }
