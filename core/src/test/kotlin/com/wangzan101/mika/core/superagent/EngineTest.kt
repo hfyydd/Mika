@@ -51,6 +51,94 @@ class EngineTest {
         assertEquals(AssignmentStatus.Pending, created.assignment.status)
         val state = store.load()
         assertEquals(setOf(created.ticket.id), state.threads.single { it.key == "t1" }.subscriptions)
+        val disposition = state.dispositions.getValue("a")
+        assertEquals("a", disposition.decisionId)
+        assertTrue(disposition.evalId?.isNotBlank() == true)
+        assertTrue(!disposition.requeued)
+        assertTrue(state.decisions["a"] is Decision.Accept)
+    }
+
+    @Test
+    fun `receive records initial disposition and followup fanout`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+
+        val initial = store.load().dispositions.getValue("a")
+        assertEquals("a", initial.triggerId)
+        assertTrue(initial.fanout.isEmpty())
+        assertTrue(initial.context.isEmpty())
+        assertTrue(initial.requeued)
+
+        val created = e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated
+        e.receive(trigger("b", text = "also tweak it", externalId = "e-b"))
+        val followup = store.load().dispositions.getValue("b")
+        assertEquals(listOf(created.ticket.id), followup.fanout)
+        assertTrue(followup.context.isEmpty())
+        assertTrue(!followup.requeued)
+        assertNull(followup.decisionId)
+    }
+
+    @Test
+    fun `bot context and queue state are recorded together`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+        val ticket = (e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated).ticket
+
+        e.receive(trigger("ci", actor = "ci-bot", isPerson = false, addressed = false, externalId = "e-ci"))
+        val disposition = store.load().dispositions.getValue("ci")
+        assertEquals(listOf(ticket.id), disposition.context)
+        assertTrue(disposition.fanout.isEmpty())
+        assertTrue(disposition.requeued)
+    }
+
+    @Test
+    fun `gate rejection is audited as a decision and filtered disposition`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a", actor = "mallory", addressed = false))
+        val outcomes = e.evaluateDue(autoPolicy)
+
+        assertTrue(outcomes[0] is EvalOutcome.NotAdmitted)
+        val state = store.load()
+        val decision = state.decisions.getValue("a")
+        assertTrue(decision is Decision.Ignore)
+        assertEquals("not_admitted:not_admitted", decision.reason)
+        val disposition = state.dispositions.getValue("a")
+        assertEquals("not_admitted:not_admitted", disposition.filtered)
+        assertEquals("a", disposition.decisionId)
+        assertTrue(!disposition.requeued)
+    }
+
+    @Test
+    fun `duplicate receive does not create a second disposition`() {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+        e.receive(trigger("a2", externalId = "e-a"))
+
+        assertEquals(setOf("a"), store.load().dispositions.keys)
+    }
+
+    @Test
+    fun `handback and ack are idempotent ledger updates`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+        val ticket = (e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated).ticket
+        e.receive(trigger("b", text = "a follow-up", externalId = "e-b"))
+
+        e.handback("b", ticket.id, "outside ticket scope")
+        e.handback("b", ticket.id, "outside ticket scope")
+        e.ack("b", ticket.id)
+        e.ack("b", ticket.id)
+
+        val disposition = store.load().dispositions.getValue("b")
+        assertEquals(1, disposition.handbacks.size)
+        assertEquals(ticket.id, disposition.handbacks.single().ticketId)
+        assertEquals("outside ticket scope", disposition.handbacks.single().reason)
+        assertEquals(listOf(ticket.id), disposition.acked)
     }
 
     @Test
@@ -142,7 +230,10 @@ class EngineTest {
         val e = engine(store, { _, _, _, _ -> throw RuntimeException("router down") })
         e.receive(trigger("a"))
         e.evaluateDue(autoPolicy)
-        assertEquals(listOf("a"), store.load().threads.single { it.key == "t1" }.queuedTriggerIds)
+        val state = store.load()
+        assertEquals(listOf("a"), state.threads.single { it.key == "t1" }.queuedTriggerIds)
+        assertTrue(state.dispositions.getValue("a").evalId?.isNotBlank() == true)
+        assertTrue(state.dispositions.getValue("a").requeued)
     }
 
     @Test

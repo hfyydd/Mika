@@ -14,7 +14,7 @@
 
 | # | 任务 | 做什么 | 验收 |
 |---|---|---|---|
-| 1.1 | 处置账本 | Trigger 落库同时记 Disposition:fanout、context、handbacks、acked、requeued、evalId、decisionId;Engine 是唯一写者 | 每条规则(拥有权/恢复/未读重评)都能从账本算出;幂等与过滤有审计记录 |
+| 1.1 | 处置账本 | ✅ Trigger 落库同时记 Disposition:fanout、context、handbacks、acked、requeued、evalId、decisionId;Engine 是唯一写者 | 每条规则(拥有权/恢复/未读重评)都能从账本算出;幂等与过滤有审计记录 |
 | 1.2 | followupOwners 谓词 | 人的跟进归谁:自己线程上的票拥有;退回的不管;只读上下文不管;已结束未停止且消息未送达的仍拥有(恢复);重排队/评估持有中的不归 | 谓词纯函数全分支用例;Engine.receive 按它决定入队与否 |
 | 1.3 | 报告状态机 | Assignment 报告六态(progress/waiting/ready/blocked/failed/dropped)+ attention 问题;`waitsForPerson` 可计算谓词;done/merged/closed/dropped/stopped 结局 | 「在等人」从字段算出,不从文本猜;报告驱动的票结束规则齐 |
 | 1.4 | handback 与 ack | 工人退回超范围消息(记账,无人拥有时回归 Eval);ack 认领消息;票结束时未读跟进释放 | 退回消息最终有新判决;已 ack 的不重评 |

@@ -35,12 +35,15 @@ class Engine(
 
         val tickets = state.tickets.toMutableList()
         var queued = true
+        val fanoutTicketIds = mutableListOf<String>()
+        val contextTicketIds = mutableListOf<String>()
 
         for ((index, ticket) in tickets.withIndex()) {
             if (ticket.threadKey != trigger.threadKey) continue
             // 人的消息落在自己的线程上:被停止过的照旧收着;没被停止的已结束 Ticket 立即恢复,不进 Eval。
             if (trigger.isPerson) {
                 queued = false
+                fanoutTicketIds += ticket.id
                 val stopped = ticket.ended?.by == "person"
                 val revived = if (!stopped && !ticket.isOpen) ticket.copy(status = TicketStatus.Open, ended = null) else ticket
                 tickets[index] = revived.copy(
@@ -48,6 +51,7 @@ class Engine(
                     updatedAtMs = now(),
                 )
             } else if (ticket.isOpen) {
+                contextTicketIds += ticket.id
                 tickets[index] = ticket.copy(
                     inputs = ticket.inputs + TicketInput(newId(), ticket.id, trigger.id, trigger.atMs),
                     updatedAtMs = now(),
@@ -62,10 +66,18 @@ class Engine(
         val newThread = if (queued) thread.copy(queuedTriggerIds = thread.queuedTriggerIds + trigger.id) else thread
         if (threadIndex >= 0) threads[threadIndex] = newThread else threads.add(newThread)
 
+        val disposition = TriggerDisposition(
+            triggerId = trigger.id,
+            fanout = fanoutTicketIds.distinct(),
+            context = contextTicketIds.distinct(),
+            requeued = queued,
+            atMs = trigger.atMs,
+        )
         store.save(state.copy(
             triggers = (state.triggers + trigger).takeLast(MAX_TRIGGERS),
             threads = threads,
             tickets = tickets,
+            dispositions = state.dispositions + (trigger.id to disposition),
             readPositions = state.readPositions + (trigger.source.instance to trigger.externalId),
         ))
         return ReceiveResult.Stored
@@ -91,16 +103,17 @@ class Engine(
             val gated = batch.map { it to gate(it, thread.key, policy, tickets) }
             val admitted = gated.filter { it.second.strength != Strength.None }
             val rejected = gated.filter { it.second.strength == Strength.None }
+            val evalId = newId()
+            stampEvalBatch(admitted, evalId)
+            recordRejected(rejected, outcomes)
 
             val decisions = try {
                 router.assess(admitted.map { it.first }, threadSummary(thread.key), tickets, policy)
             } catch (_: Exception) {
-                // Router 不可用:整批留在队列里,未过门禁的照常拒绝。
-                recordRejected(rejected, outcomes)
+                // Router 不可用:整批留在队列里;门禁拒绝已先落账。
                 continue
             }
 
-            recordRejected(rejected, outcomes)
             decisions.zip(admitted).forEach { (decision, pair) ->
                 val (trigger, gateResult) = pair
                 outcomes += apply(store, decision, trigger, gateResult, policy)
@@ -128,10 +141,30 @@ class Engine(
     private fun recordRejected(rejected: List<Pair<Trigger, GateResult>>, outcomes: MutableList<EvalOutcome>) {
         if (rejected.isEmpty()) return
         val state = store.load()
-        store.save(state.copy(decisions = state.decisions + rejected.associate { (t, g) ->
-            t.id to "not_admitted:${g.basis}"
-        }))
+        store.save(state.copy(
+            decisions = state.decisions + rejected.associate { (t, g) ->
+                t.id to Decision.Ignore(t.id, "not_admitted:${g.basis}")
+            },
+            dispositions = state.dispositions + rejected.associate { (t, g) ->
+                val base = state.dispositions[t.id] ?: TriggerDisposition(triggerId = t.id, atMs = t.atMs)
+                t.id to base.copy(
+                    filtered = "not_admitted:${g.basis}",
+                    decisionId = t.id,
+                    requeued = false,
+                )
+            },
+        ))
         rejected.forEach { (t, _) -> outcomes += EvalOutcome.NotAdmitted(t.id, "not admitted") }
+    }
+
+    /** Router 是外部副作用;批次编号先落盘,失败重试时能看到这条 Trigger 参加过哪次 Eval。 */
+    private fun stampEvalBatch(admitted: List<Pair<Trigger, GateResult>>, evalId: String) {
+        if (admitted.isEmpty()) return
+        val state = store.load()
+        store.save(state.copy(dispositions = state.dispositions + admitted.associate { (trigger, _) ->
+            val base = state.dispositions[trigger.id] ?: TriggerDisposition(triggerId = trigger.id, atMs = trigger.atMs)
+            trigger.id to base.copy(evalId = evalId, requeued = true)
+        }))
     }
 
     private fun threadSummary(threadKey: String): String {
@@ -147,16 +180,18 @@ class Engine(
         val state = current.load()
         when (decision) {
             is Decision.Accept -> {
-                val recorded = state.decisions + (trigger.id to "accept:${decision.title}")
+                val recorded = decisionState(state, trigger, decision)
                 if (policy.acceptMode == AcceptMode.Observe) {
-                    current.save(state.copy(
-                        decisions = recorded,
+                    current.save(recorded.copy(
                         observations = (state.observations + "would accept ${trigger.id}: ${decision.title}").takeLast(MAX_OBSERVATIONS),
                     ))
                     return EvalOutcome.WouldAccept(trigger.id, decision.reason)
                 }
                 if (policy.acceptMode == AcceptMode.Off && gateResult.strength == Strength.Inferred) {
-                    current.save(state.copy(decisions = recorded + (trigger.id to "not_admitted:mode_off")))
+                    val rejected = decisionState(state, trigger, Decision.Ignore(trigger.id, "not_admitted:mode_off")) {
+                        it.copy(filtered = "mode_off")
+                    }
+                    current.save(rejected)
                     return EvalOutcome.NotAdmitted(trigger.id, "accept mode is off")
                 }
                 val mandate = Mandate(
@@ -168,8 +203,7 @@ class Engine(
                     mandate = mandate, triggerIds = listOf(trigger.id), createdAtMs = now(), updatedAtMs = now(),
                 )
                 val assignment = Assignment(id = newId(), ticketId = ticket.id)
-                current.save(state.copy(
-                    decisions = recorded,
+                current.save(recorded.copy(
                     tickets = state.tickets + ticket,
                     assignments = state.assignments + assignment,
                     threads = state.threads.map { if (it.key == ticket.threadKey) it.copy(subscriptions = it.subscriptions + ticket.id) else it },
@@ -178,36 +212,79 @@ class Engine(
             }
             is Decision.Attach -> {
                 val ticket = state.tickets.firstOrNull { it.id == decision.ticketId } ?: return EvalOutcome.Ignored(
-                    Decision.Ignore(trigger.id, "attach target missing"))
+                    Decision.Ignore(trigger.id, "attach target missing").also { missing ->
+                        current.save(decisionState(state, trigger, missing) { it.copy(filtered = "attach_target_missing") })
+                    }
+                )
                 val withInput = ticket.copy(
                     inputs = ticket.inputs + TicketInput(newId(), ticket.id, trigger.id, trigger.atMs),
                     status = TicketStatus.Open, ended = null, updatedAtMs = now(),
                 )
-                current.save(state.copy(
-                    decisions = state.decisions + (trigger.id to "attach:${ticket.id}"),
+                val recorded = decisionState(state, trigger, decision) { disposition ->
+                    disposition.copy(context = (disposition.context + ticket.id).distinct())
+                }
+                current.save(recorded.copy(
                     tickets = state.tickets.map { if (it.id == ticket.id) withInput else it },
                 ))
                 return EvalOutcome.Attached(withInput)
             }
             is Decision.Stop -> {
                 val ticket = state.tickets.firstOrNull { it.id == decision.ticketId }
-                    ?: return EvalOutcome.Ignored(Decision.Ignore(trigger.id, "stop target missing"))
+                    ?: return EvalOutcome.Ignored(Decision.Ignore(trigger.id, "stop target missing").also { missing ->
+                        current.save(decisionState(state, trigger, missing) { it.copy(filtered = "stop_target_missing") })
+                    })
                 val ended = ticket.copy(
                     status = TicketStatus.Ended,
                     ended = TicketEnd(now(), "person", decision.reason.ifBlank { "stopped" }, "stopped"),
                     updatedAtMs = now(),
                 )
-                current.save(state.copy(
-                    decisions = state.decisions + (trigger.id to "stop:${ticket.id}"),
+                current.save(decisionState(state, trigger, decision).copy(
                     tickets = state.tickets.map { if (it.id == ticket.id) ended else it },
                 ))
                 return EvalOutcome.TicketStopped(ended)
             }
             is Decision.Ignore -> {
-                current.save(state.copy(decisions = state.decisions + (trigger.id to "ignore:${decision.reason}")))
+                current.save(decisionState(state, trigger, decision))
                 return EvalOutcome.Ignored(decision)
             }
         }
+    }
+
+    /** 判决与 disposition 必须同快照落盘,保证账本读到的是同一次状态迁移。 */
+    private fun decisionState(
+        state: SuperagentState,
+        trigger: Trigger,
+        decision: Decision,
+        transform: (TriggerDisposition) -> TriggerDisposition = { it },
+    ): SuperagentState {
+        val base = state.dispositions[trigger.id] ?: TriggerDisposition(triggerId = trigger.id, atMs = trigger.atMs)
+        val disposition = transform(
+            base.copy(decisionId = trigger.id, requeued = false)
+        )
+        return state.copy(
+            decisions = state.decisions + (trigger.id to decision),
+            dispositions = state.dispositions + (trigger.id to disposition),
+        )
+    }
+
+    /** 工人交回一条消息;同一 Ticket 只记一次,保留第一条原因作为审计依据。 */
+    fun handback(triggerId: String, ticketId: String, reason: String): Boolean {
+        val state = store.load()
+        val disposition = state.dispositions[triggerId] ?: return false
+        if (disposition.handbacks.any { it.ticketId == ticketId }) return false
+        val updated = disposition.copy(handbacks = disposition.handbacks + Handback(ticketId, reason, now()))
+        store.save(state.copy(dispositions = state.dispositions + (triggerId to updated)))
+        return true
+    }
+
+    /** Executor 确认读走一条直通消息;重复 ack 幂等。 */
+    fun ack(triggerId: String, ticketId: String): Boolean {
+        val state = store.load()
+        val disposition = state.dispositions[triggerId] ?: return false
+        if (ticketId in disposition.acked) return false
+        val updated = disposition.copy(acked = disposition.acked + ticketId)
+        store.save(state.copy(dispositions = state.dispositions + (triggerId to updated)))
+        return true
     }
 
     /** Executor 开跑;只有 Pending 能转 Running,幂等。 */

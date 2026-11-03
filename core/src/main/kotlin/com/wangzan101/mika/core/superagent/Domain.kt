@@ -101,6 +101,29 @@ data class Ticket(
 @Serializable
 data class TicketInput(val id: String, val ticketId: String, val triggerId: String, val atMs: Long)
 
+/** 工人把一条直通消息退回:账本保留退回原因,后续归属规则用它排除这条消息。 */
+@Serializable
+data class Handback(val ticketId: String, val reason: String, val atMs: Long)
+
+/**
+ * 一个 Trigger 从入库到最终判决的生命周期账本。
+ * [fanout] 是作为拥有者消息直通送达的 Ticket;[context] 是只读上下文送达的 Ticket;
+ * [evalId] 标记它参加过的 Eval 批次;[decisionId] 指向状态里的判决账本。
+ */
+@Serializable
+data class TriggerDisposition(
+    val triggerId: String,
+    val filtered: String? = null,
+    val evalId: String? = null,
+    val decisionId: String? = null,
+    val fanout: List<String> = emptyList(),
+    val context: List<String> = emptyList(),
+    val requeued: Boolean = false,
+    val handbacks: List<Handback> = emptyList(),
+    val acked: List<String> = emptyList(),
+    val atMs: Long,
+)
+
 @Serializable
 enum class AssignmentStatus { Pending, Running, Ended }
 

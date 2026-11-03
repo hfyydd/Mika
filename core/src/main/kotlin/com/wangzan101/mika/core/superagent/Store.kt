@@ -14,8 +14,10 @@ data class SuperagentState(
     val triggers: List<Trigger> = emptyList(),
     val tickets: List<Ticket> = emptyList(),
     val assignments: List<Assignment> = emptyList(),
-    /** 已记录的判决(id = triggerId);幂等与审计用。 */
-    val decisions: Map<String, String> = emptyMap(),
+    /** 已记录的完整判决,key = triggerId;幂等与审计用。 */
+    val decisions: Map<String, Decision> = emptyMap(),
+    /** Trigger 的处置账本,key = triggerId;归属、重评和审计都从这里算。 */
+    val dispositions: Map<String, TriggerDisposition> = emptyMap(),
     /** 收件游标,按 source instance 记;重启后不重放事件。 */
     val readPositions: Map<String, String> = emptyMap(),
     /** Observe 模式的「本会接受」记录。 */
