@@ -306,6 +306,7 @@ private fun MikaRoot(store: ProviderStore, monitor: SystemStatusMonitor, activit
                 conversationChanges = ConversationStore.shared(context).changes,
                 conversationTitle = { ConversationStore.shared(context).title(it) },
                 onPlans = { nav.pushFromDrawer(Route.Plans) },
+                onSuperagent = { nav.pushFromDrawer(Route.Superagent) },
                 onMemory = { nav.pushFromDrawer(Route.Memory) },
                 onSettings = { nav.pushFromDrawer(Route.Settings) },
                 onBrowser = { nav.pushFromDrawer(Route.Browser) },
@@ -427,6 +428,7 @@ private fun MikaRoot(store: ProviderStore, monitor: SystemStatusMonitor, activit
             app.chat.openConversation(it)
             nav.reset()
         })
+        Route.Superagent -> SuperagentScreen(onBack = back)
         Route.Screens -> ScreensScreen(app.taskState, onBack = back, onOpenConversation = {
             app.chat.openConversation(it)
             nav.reset()

@@ -52,6 +52,7 @@
     <string name="drawer_phone_not_ready">手机操作还没准备好</string>
     <string name="all_ready">一切就绪</string>
     <string name="drawer_plans">定时任务</string>
+    <string name="superagent_shortcut">Super</string>
     <string name="memory_and_skills">记忆与技能</string>
     <string name="drawer_browser">浏览器</string>
     <string name="drawer_recent">最近</string>

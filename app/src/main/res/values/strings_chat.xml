@@ -53,6 +53,7 @@
     <string name="drawer_phone_not_ready">Phone control isn’t ready</string>
     <string name="all_ready">All set</string>
     <string name="drawer_plans">Scheduled tasks</string>
+    <string name="superagent_shortcut">Super</string>
     <string name="memory_and_skills">Memory &amp; skills</string>
     <string name="drawer_browser">Browser</string>
     <string name="drawer_recent">Recent</string>
