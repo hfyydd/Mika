@@ -114,6 +114,8 @@ class Engine(
             val evalId = newId()
             stampEvalBatch(admitted, evalId)
             recordRejected(rejected, outcomes)
+            val seed = batchSeed(admitted)
+            val started = startedTicketTriggers(tickets)
 
             val decisions = try {
                 router.assess(admitted.map { it.first }, threadSummary(thread.key), tickets, policy)
@@ -122,8 +124,13 @@ class Engine(
                 continue
             }
 
-            decisions.zip(admitted).forEach { (decision, pair) ->
+            decisions.zip(admitted).forEach { (routerDecision, pair) ->
                 val (trigger, gateResult) = pair
+                val decision = when {
+                    trigger.id in started -> Decision.Ignore(trigger.id, "startedTicket")
+                    routerDecision is Decision.Accept && trigger.id != seed?.id -> Decision.Ignore(trigger.id, "secondary_in_batch")
+                    else -> routerDecision
+                }
                 outcomes += apply(store, decision, trigger, gateResult, policy)
             }
             store.save(store.load().let { s ->

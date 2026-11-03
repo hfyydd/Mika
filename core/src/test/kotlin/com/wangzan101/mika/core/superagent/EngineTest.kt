@@ -18,10 +18,10 @@ class EngineTest {
 
     private fun trigger(
         id: String, actor: String = "alice", addressed: Boolean = true, isPerson: Boolean = true,
-        threadKey: String = "t1", externalId: String = "e-$id", text: String = "do the thing",
+        threadKey: String = "t1", externalId: String = "e-$id", text: String = "do the thing", atMs: Long = 100,
     ) = Trigger(
         id = id, source = SourceRef("test", "s1"), externalId = externalId, threadKey = threadKey,
-        actor = actor, isPerson = isPerson, addressed = addressed, text = text, atMs = 100,
+        actor = actor, isPerson = isPerson, addressed = addressed, text = text, atMs = atMs,
     )
 
     private val autoPolicy = Policy(version = "p1", acceptMode = AcceptMode.Auto, allowedActors = mapOf("s1" to listOf("alice")))
@@ -292,6 +292,51 @@ class EngineTest {
         assertEquals(listOf("a"), state.threads.single { it.key == "t1" }.queuedTriggerIds)
         assertTrue(state.dispositions.getValue("a").evalId?.isNotBlank() == true)
         assertTrue(state.dispositions.getValue("a").requeued)
+    }
+
+    @Test
+    fun `batch accepts only the strongest seed`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a", atMs = 100))
+        e.receive(trigger("inf", actor = "mallory", atMs = 200, externalId = "e-inf"))
+        e.evaluateDue(autoPolicy)
+
+        val state = store.load()
+        assertEquals(1, state.tickets.size)
+        assertEquals(listOf("a"), state.tickets.single().triggerIds)
+        assertEquals("secondary_in_batch", (state.decisions.getValue("inf") as Decision.Ignore).reason)
+    }
+
+    @Test
+    fun `same strength accepts only the latest trigger`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("old", atMs = 100))
+        e.receive(trigger("new", atMs = 200, externalId = "e-new"))
+        e.evaluateDue(autoPolicy)
+
+        val state = store.load()
+        assertEquals(1, state.tickets.size)
+        assertEquals(listOf("new"), state.tickets.single().triggerIds)
+    }
+
+    @Test
+    fun `trigger that already started a ticket cannot accept again`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+        e.evaluateDue(autoPolicy)
+        val state0 = store.load()
+        store.save(state0.copy(
+            threads = state0.threads.map { it.copy(queuedTriggerIds = listOf("a")) },
+            dispositions = state0.dispositions + ("a" to state0.dispositions.getValue("a").copy(requeued = true, decisionId = null)),
+        ))
+
+        e.evaluateDue(autoPolicy)
+        val state = store.load()
+        assertEquals(1, state.tickets.size)
+        assertEquals("startedTicket", (state.decisions.getValue("a") as Decision.Ignore).reason)
     }
 
     @Test
