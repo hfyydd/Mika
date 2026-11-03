@@ -530,6 +530,23 @@ class Engine(
         return retried
     }
 
+    /** 进程重启恢复:旧进程留下的 Running 没有守护者,立刻终结并另派新 Assignment。 */
+    fun recoverAbandoned(): List<Assignment> {
+        val state = store.load()
+        val abandoned = state.assignments.filter { it.status == AssignmentStatus.Running }
+        if (abandoned.isEmpty()) return emptyList()
+        val retried = abandoned.map { Assignment(id = newId(), ticketId = it.ticketId) }
+        store.save(state.copy(assignments = state.assignments.map { a ->
+            if (abandoned.any { it.id == a.id }) a.copy(
+                status = AssignmentStatus.Ended,
+                state = ReportState.Failed,
+                endedAtMs = now(),
+                outcome = "interrupted",
+            ) else a
+        } + retried))
+        return retried
+    }
+
     /** Policy 变更:重验每个开放 Ticket 的 Mandate,不再成立的撤销(交给人的停止去收尾,不删进行中的工作)。 */
     fun policyChanged(next: Policy): List<PolicyEffect> {
         val state = store.load()

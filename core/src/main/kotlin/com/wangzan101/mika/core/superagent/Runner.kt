@@ -5,7 +5,12 @@ package com.wangzan101.mika.core.superagent
  * Mika 是底层支撑:它拿到的是 Ticket(含 Mandate 的 scope 与原始 Trigger 引用),
  * 自己经装配层把 scope 映射成能力子集、读原始请求,跑完回报;崩溃由 Engine 的看门狗接手。
  */
-class Runner(private val engine: Engine, private val executor: SuperExecutor) {
+class Runner(
+    private val engine: Engine,
+    private val executor: SuperExecutor,
+    private val effects: EffectQueue? = null,
+    private val now: () -> Long = System::currentTimeMillis,
+) {
 
     /** 领取一个 Assignment 并跑完;返回 true 表示报告已记录。 */
     suspend fun runAssignment(assignmentId: String): Boolean {
@@ -13,6 +18,20 @@ class Runner(private val engine: Engine, private val executor: SuperExecutor) {
         val assignment = state.assignments.firstOrNull { it.id == assignmentId } ?: return false
         val ticket = state.tickets.firstOrNull { it.id == assignment.ticketId } ?: return false
         if (!ticket.isOpen) return false
+        if (effects == null) return execute(assignmentId, ticket)
+        effects.submit("assignment:$assignmentId", EffectKind.Assignment, ticket.id, assignmentId)
+        effects.drain { record ->
+            if (record.id == "assignment:$assignmentId") {
+                execute(assignmentId, ticket)
+                "assignment:$assignmentId"
+            } else {
+                error("queue is blocked by ${record.id}")
+            }
+        }
+        return true
+    }
+
+    private suspend fun execute(assignmentId: String, ticket: Ticket): Boolean {
         engine.assignmentStarted(assignmentId)
         return try {
             val report = executor.run(ticket, threadSummary(engine, ticket.threadKey))
