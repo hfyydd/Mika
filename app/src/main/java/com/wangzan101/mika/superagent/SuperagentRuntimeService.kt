@@ -32,6 +32,7 @@ import com.wangzan101.mika.superagent.bridge.SuperagentBridge
 import com.wangzan101.mika.superagent.bridge.SuperagentLocalReplyChannel
 import com.wangzan101.mika.superagent.bridge.SuperagentLocalSource
 import com.wangzan101.mika.superagent.bridge.SuperagentRuntimeHosts
+import com.wangzan101.mika.superagent.bridge.SuperagentStatusObserver
 import com.wangzan101.mika.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -48,6 +49,7 @@ class SuperagentRuntimeService : Service() {
     private val bridge by lazy { SuperagentBridge.get(this) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val localSource = SuperagentLocalSource()
+    private val statusObserver = SuperagentStatusObserver(this)
     private var runtime: SuperagentRuntime? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -126,7 +128,15 @@ class SuperagentRuntimeService : Service() {
             sources = listOfNotNull(localSource, telegram?.let { TelegramSource(it) }),
             effects = effects,
             outbox = localOutbox,
-        ).also { it.start(scope, settings.pollIntervalMs) }
+        ).also { runtime ->
+            runtime.start(scope, settings.pollIntervalMs)
+            scope.launch {
+                while (true) {
+                    kotlinx.coroutines.delay(1000)
+                    statusObserver.apply(engine.snapshot())
+                }
+            }
+        }
     }
 
     private fun mergePolicy(

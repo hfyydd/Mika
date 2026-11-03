@@ -289,6 +289,7 @@ class MikaApp : Application(), WebOwner, SandboxOwner, TaskEnvironment.Owner, Ph
             endedRunIds = taskState.endedRunIds,
             parallelFlag = { FeatureFlags.get(app).speedFlags().parallelTasks },
             superMode = superHost.superMode,
+            superStatus = superHost.statuses,
             beginSuper = { goal, conversationId -> superHost.beginSuper(goal, conversationId) },
             shownTask = taskState.shownTask,
             activeConversations = taskState.activeConversations,

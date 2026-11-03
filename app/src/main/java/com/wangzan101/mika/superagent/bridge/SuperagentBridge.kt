@@ -36,10 +36,16 @@ class SuperagentBridge {
         sourceRef = source
     }
 
+    /** Runtime 收完本地来源的一批消息后可按状态推进卡片。 */
+    fun report(conversationId: String, ticketId: String, goal: String, line: String) {
+        updateStatus(conversationId, ticketId, goal, line)
+    }
+
     fun unregisterSource() {
         sourceRef = null
     }
 
+    /** Runtime 收完本地来源的一批消息后登记当前活跃 Ticket。 */
     fun recordStarted(conversationId: String, ticketId: String, goal: String) {
         synchronized(tickets) { tickets[conversationId] = ticketId }
         set(_statuses) { it + (conversationId to SuperWorkStatus(ticketId, goal, "accepted")) }
@@ -58,9 +64,11 @@ class SuperagentBridge {
     fun statusFor(conversationId: String): SuperWorkStatus? = _statuses.value[conversationId]
 
     /** 服务还没起时返回 false，聊天入口照常走 Mika 本体任务。 */
+    /** 服务还没起时返回 false，聊天入口照常走 Mika 本体任务。记录当前对话的活跃任务状态。 */
     fun send(conversationId: String, text: String): Boolean {
         if (!_enabled.value) return false
         sourceRef?.send(conversationId, externalId = "m${System.currentTimeMillis()}", actor = "owner", text = text)
+        set(_statuses) { it + (conversationId to SuperWorkStatus("pending-${System.currentTimeMillis()}", text, "working")) }
         return true
     }
 

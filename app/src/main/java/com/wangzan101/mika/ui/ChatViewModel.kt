@@ -324,6 +324,9 @@ class ChatViewModel(
     private val parallelFlag: () -> Boolean = { false },
     /** Super 模式：用户打开侧栏 Super 后才走这个桥；传空时保持原行为。 */
     private val superMode: StateFlow<Boolean> = MutableStateFlow(false),
+    /** Super 层的最新状态;界面上仍是普通任务卡片,只是来源不是 TaskRun。 */
+    private val superStatus: StateFlow<Map<String, com.wangzan101.mika.superagent.bridge.SuperWorkStatus>> =
+        MutableStateFlow(emptyMap()),
     /** 原话送到 Super 层；false 时回复调用方，走普通 Mika 本体任务。 */
     private val beginSuper: (String, String) -> Boolean = { _, _ -> false },
 
@@ -479,6 +482,33 @@ class ChatViewModel(
         // 任务登记进任务列表(原话可以取了)可能晚于它的第一个状态:那时接上的那一问一答补上原话
         scope.launch { activeConversations.collect { fillGoal() } }
         scope.launch { summarizing.collect { set -> _ui.update { ui -> ui.copy(exchanges = ui.exchanges.map { withSummarizing(it, set) }) } } }
+        // Super 模式没有 TaskRun:进度、问题和结束都经这里进同一张卡片
+        scope.launch {
+            superStatus.collect { map ->
+                val map = map
+                val id = _ui.value.conversationId ?: return@collect
+                val status = map[id] ?: return@collect
+                if (liveIndex < 0) {
+                    _ui.update {
+                        liveIndex = it.exchanges.size
+                        it.copy(
+                            exchanges = it.exchanges + Exchange(status.goal, emptyList(), ExchangeStatus.Working, live = true),
+                            composer = ComposerMode.Busy,
+                        )
+                    }
+                }
+                _ui.update { ui ->
+                    val old = ui.exchanges.getOrNull(liveIndex) ?: return@update ui
+                    val next = when (status.line) {
+                        "waiting" -> Exchange(status.goal, emptyList(), ExchangeStatus.NeedsInput(status.line, null), live = true)
+                        "done" -> Exchange(status.goal, emptyList(), ExchangeStatus.Done(status.line, null), live = false)
+                        "failed" -> Exchange(status.goal, emptyList(), ExchangeStatus.Failed(status.line), live = false)
+                        else -> Exchange(status.goal, emptyList(), ExchangeStatus.Working, live = true, line = status.line)
+                    }
+                    ui.copy(exchanges = ui.exchanges.toMutableList().also { it[liveIndex] = next }, composer = ComposerMode.Busy)
+                }
+            }
+        }
     }
 
     /** 停止的那一轮:交代还在写时标上「正在整理」;写好了、写不成就去掉。 */
