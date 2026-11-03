@@ -8,6 +8,7 @@
 
 | 文档 | 讲什么 |
 | --- | --- |
+| [position.md](position.md) | 项目定位（手机即执行电脑）、总体架构、铁律与路线图 |
 | [architecture.md](architecture.md) | 按代码现状写的整体结构，带类名和文件路径：主循环、工具、手机操作、浏览器、沙箱、电脑连接、知识与技能 |
 | [roadmap.md](roadmap.md) | 已完成、接下来、已知问题与暂缓 |
 
