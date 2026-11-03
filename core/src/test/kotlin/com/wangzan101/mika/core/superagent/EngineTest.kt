@@ -30,6 +30,15 @@ class EngineTest {
         batch.map { Decision.Accept(it.id, title = "work", scope = "test scope", reason = "ok") }
     }
 
+    private fun strictRouter(): Router = Router { batch, _, _, _ ->
+        batch.map {
+            Decision.Accept(
+                it.id, title = "work", scope = "test scope", reason = "inferred",
+                matchedRule = "rule-1", direction = "create", motivationRef = it.text.take(40), hostVerified = true,
+            )
+        }
+    }
+
     @Test
     fun `receive is idempotent per source external id`() {
         val store = MemorySuperagentStore()
@@ -343,8 +352,10 @@ class EngineTest {
     fun `allowlisted addressed bot is inferred but never explicit`() = runTest {
         val store = MemorySuperagentStore()
         val e = engine(store, acceptRouter())
-        e.receive(trigger("bot", actor = "ci-bot", isPerson = false, addressed = true))
-        val outcome = e.evaluateDue(autoPolicy.copy(allowedActors = mapOf("s1" to listOf("alice", "ci-bot"))))[0]
+        e.receive(trigger("bot", actor = "ci-bot", isPerson = false, addressed = true, text = "ci asked for report"))
+        val outcome = Engine(
+            store, strictRouter(), newId = ::ids, now = { 1000 },
+        ).evaluateDue(autoPolicy.copy(allowedActors = mapOf("s1" to listOf("alice", "ci-bot"))))[0]
 
         val created = outcome as EvalOutcome.TicketCreated
         assertEquals(Strength.Inferred, created.ticket.mandate.strength)
@@ -393,7 +404,7 @@ class EngineTest {
         val store = MemorySuperagentStore()
         val e = engine(store, acceptRouter())
         e.receive(trigger("anon", actor = ""))
-        val outcome = e.evaluateDue(autoPolicy)[0]
+        val outcome = Engine(store, strictRouter(), newId = ::ids, now = { 1000 }).evaluateDue(autoPolicy)[0]
 
         val created = outcome as EvalOutcome.TicketCreated
         assertEquals(Strength.Inferred, created.ticket.mandate.strength)

@@ -19,6 +19,8 @@ class LlmRouter(private val model: ChatModel) : Router {
             You are the router of a super-agent system. A phone assistant executes the work; you only decide routing.
             For each incoming trigger, output exactly one decision:
             - accept: new work; include "title" (short) and "scope" (one sentence describing what the work may touch).
+            For an inferred candidate, accept also requires "matchedRule", "direction", "motivationRef"
+            (a short quote or exact reference, not a paraphrase), and hostVerified=true. Never guess these.
             - attach: the trigger points at an existing ticket by id; include "ticketId".
             - ignore: not work for the agent; include a short reason.
             - stop: a person explicitly stops a ticket; include "ticketId".
@@ -39,6 +41,10 @@ class LlmRouter(private val model: ChatModel) : Router {
             }
             appendLine("Triggers (judge each):")
             batch.forEach { t ->
+                val strength = if (policy.allows(t.source.instance, t.actor)) {
+                    if (t.addressed || tickets.isNotEmpty()) "explicit" else "inferred"
+                } else "inferred"
+                appendLine("  - admission=$strength")
                 appendLine("  - id=${t.id} actor=${t.actor} person=${t.isPerson} addressed=${t.addressed} at=${t.atMs}")
                 appendLine("    text: ${t.text.take(600)}")
             }
@@ -56,6 +62,10 @@ class LlmRouter(private val model: ChatModel) : Router {
         private val TITLE_PATTERN = Regex("\"title\"\\s*:\\s*\"([^\"]*)\"")
         private val SCOPE_PATTERN = Regex("\"scope\"\\s*:\\s*\"([^\"]*)\"")
         private val REASON_PATTERN = Regex("\"reason\"\\s*:\\s*\"([^\"]*)\"")
+        private val MATCHED_RULE_PATTERN = Regex("\"matchedRule\"\\s*:\\s*\"([^\"]*)\"")
+        private val DIRECTION_PATTERN = Regex("\"direction\"\\s*:\\s*\"([^\"]*)\"")
+        private val MOTIVATION_REF_PATTERN = Regex("\"motivationRef\"\\s*:\\s*\"([^\"]*)\"")
+        private val HOST_VERIFIED_PATTERN = Regex("\"hostVerified\"\\s*:\\s*(true|false)")
 
         private fun first(text: String, pattern: Regex, from: Int, to: Int): String? =
             pattern.findAll(text).firstOrNull { it.range.first in from..to }?.groupValues?.get(1)
@@ -79,7 +89,16 @@ class LlmRouter(private val model: ChatModel) : Router {
                 val action = first(trimmed, ACTION_PATTERN, from, to) ?: return@mapIndexed Decision.Ignore(trigger.id, "missing action")
                 val reason = first(trimmed, REASON_PATTERN, from, to) ?: ""
                 when (action.lowercase()) {
-                    "accept" -> Decision.Accept(trigger.id, first(trimmed, TITLE_PATTERN, from, to) ?: trigger.text.take(40), first(trimmed, SCOPE_PATTERN, from, to) ?: "", reason)
+                    "accept" -> Decision.Accept(
+                        trigger.id,
+                        first(trimmed, TITLE_PATTERN, from, to) ?: trigger.text.take(40),
+                        first(trimmed, SCOPE_PATTERN, from, to) ?: "",
+                        reason,
+                        first(trimmed, MATCHED_RULE_PATTERN, from, to) ?: "",
+                        first(trimmed, DIRECTION_PATTERN, from, to) ?: "",
+                        first(trimmed, MOTIVATION_REF_PATTERN, from, to) ?: "",
+                        first(trimmed, HOST_VERIFIED_PATTERN, from, to)?.toBooleanStrictOrNull() ?: false,
+                    )
                     "attach" -> Decision.Attach(trigger.id, first(trimmed, TICKET_ID_PATTERN, from, to) ?: "", reason)
                     "stop" -> Decision.Stop(trigger.id, first(trimmed, TICKET_ID_PATTERN, from, to) ?: "", reason)
                     else -> Decision.Ignore(trigger.id, reason.ifBlank { "ignored by router" })

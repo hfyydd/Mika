@@ -174,7 +174,17 @@ sealed interface Decision {
     val reason: String
 
     @Serializable
-    data class Accept(override val triggerId: String, val title: String, val scope: String, override val reason: String) : Decision
+    data class Accept(
+        override val triggerId: String,
+        val title: String,
+        val scope: String,
+        override val reason: String,
+        /** 推断路径必填;显式路径可省。 */
+        val matchedRule: String = "",
+        val direction: String = "",
+        val motivationRef: String = "",
+        val hostVerified: Boolean = false,
+    ) : Decision
 
     @Serializable
     data class Attach(override val triggerId: String, val ticketId: String, override val reason: String) : Decision

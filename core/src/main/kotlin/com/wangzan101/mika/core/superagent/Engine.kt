@@ -279,6 +279,21 @@ class Engine(
         when (decision) {
             is Decision.Accept -> {
                 val recorded = decisionState(state, trigger, decision)
+                if (gateResult.strength == Strength.Inferred) {
+                    val missing = when {
+                        decision.matchedRule.isBlank() -> "inferred_missing_rule"
+                        decision.direction.isBlank() -> "inferred_missing_direction"
+                        decision.motivationRef.isBlank() -> "inferred_missing_motivation"
+                        !decision.hostVerified -> "inferred_missing_host_check"
+                        else -> ""
+                    }
+                    if (missing.isNotBlank()) {
+                        current.save(decisionState(state, trigger, Decision.Ignore(trigger.id, missing)) {
+                            it.copy(filtered = missing)
+                        })
+                        return EvalOutcome.NotAdmitted(trigger.id, missing)
+                    }
+                }
                 if (policy.acceptMode == AcceptMode.Observe) {
                     current.save(recorded.copy(
                         observations = (state.observations + "would accept ${trigger.id}: ${decision.title}").takeLast(MAX_OBSERVATIONS),
@@ -294,7 +309,9 @@ class Engine(
                 }
                 val mandate = Mandate(
                     policyVersion = policy.version, sourceInstance = trigger.source.instance, scope = decision.scope, strength = gateResult.strength,
-                    basis = gateResult.basis, actor = trigger.actor, matchedRule = decision.reason, createdAtMs = now(),
+                    basis = gateResult.basis, actor = trigger.actor,
+                    matchedRule = if (gateResult.strength == Strength.Inferred) decision.matchedRule else decision.reason,
+                    createdAtMs = now(),
                 )
                 val ticket = Ticket(
                     id = newId(), threadKey = trigger.threadKey, title = decision.title, instruction = "trigger:${trigger.id}",
