@@ -33,23 +33,22 @@ class Engine(
         if (state.triggers.any { it.source == trigger.source && it.externalId == trigger.externalId })
             return ReceiveResult.Duplicate
 
+        val ownerIds = followupOwners(trigger, state.tickets, state.dispositions).toSet()
         val tickets = state.tickets.toMutableList()
-        var queued = true
+        var queued = !trigger.isPerson || ownerIds.isEmpty()
         val fanoutTicketIds = mutableListOf<String>()
         val contextTicketIds = mutableListOf<String>()
 
         for ((index, ticket) in tickets.withIndex()) {
-            if (ticket.threadKey != trigger.threadKey) continue
-            // 人的消息落在自己的线程上:被停止过的照旧收着;没被停止的已结束 Ticket 立即恢复,不进 Eval。
             if (trigger.isPerson) {
-                queued = false
-                fanoutTicketIds += ticket.id
+                if (ticket.id !in ownerIds) continue
                 val stopped = ticket.ended?.by == "person"
                 val revived = if (!stopped && !ticket.isOpen) ticket.copy(status = TicketStatus.Open, ended = null) else ticket
                 tickets[index] = revived.copy(
                     inputs = revived.inputs + TicketInput(newId(), revived.id, trigger.id, trigger.atMs),
                     updatedAtMs = now(),
                 )
+                fanoutTicketIds += ticket.id
             } else if (ticket.isOpen) {
                 contextTicketIds += ticket.id
                 tickets[index] = ticket.copy(

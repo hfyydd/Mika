@@ -207,7 +207,8 @@ class EngineTest {
         val stopped = store.load().tickets.single { it.id == ticket.id }
         assertEquals(TicketStatus.Ended, stopped.status)
         assertEquals("person", stopped.ended?.by)
-        assertEquals(2, stopped.inputs.size)
+        assertEquals(1, stopped.inputs.size)
+        assertEquals(listOf("c"), store.load().threads.single { it.key == "t1" }.queuedTriggerIds)
     }
 
     @Test
