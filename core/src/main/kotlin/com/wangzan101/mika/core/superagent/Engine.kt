@@ -11,10 +11,13 @@ class Engine(
     private val executor: SuperExecutor? = null,
     private val newId: () -> String = { java.util.UUID.randomUUID().toString().take(12) },
     private val now: () -> Long = System::currentTimeMillis,
+    private val evalDeadlineMs: Long = EVAL_DEADLINE_MS,
 ) {
     companion object {
         const val MAX_TRIGGERS = 500
         const val MAX_OBSERVATIONS = 200
+        const val EVAL_DEADLINE_MS = 5 * 60_000L
+        const val MAX_EVAL_REQUEUES = 2
         /** 看门狗:Assignment 跑了这么久还没报告,按中断处理,重新派一个(Executor 自查状态再续)。 */
         const val ASSIGNMENT_TIMEOUT_MS = 30 * 60_000L
     }
@@ -23,6 +26,8 @@ class Engine(
         data object Stored : ReceiveResult
         data object Duplicate : ReceiveResult
     }
+
+    private data class EvalSchedule(val state: SuperagentState, val runnableIds: List<String>)
 
     /** 供 Runner 与诊断读当前快照;Engine 仍是唯一写者。 */
     fun snapshot(): SuperagentState = store.load()
@@ -71,6 +76,8 @@ class Engine(
             context = contextTicketIds.distinct(),
             requeued = queued,
             atMs = trigger.atMs,
+            admittedAtMs = trigger.atMs.takeIf { queued },
+            evalDeadlineAtMs = (trigger.atMs + evalDeadlineMs).takeIf { queued },
         )
         store.save(state.copy(
             triggers = (state.triggers + trigger).takeLast(MAX_TRIGGERS),
@@ -89,7 +96,9 @@ class Engine(
         for (thread in state.threads.toList()) {
             val queuedIds = thread.queuedTriggerIds
             if (queuedIds.isEmpty()) continue
-            val batch = queuedIds.mapNotNull { id -> state.triggers.firstOrNull { it.id == id } }
+            val schedule = manageEvalSchedule(state, thread.key, queuedIds)
+            if (schedule.state != state) store.save(schedule.state)
+            val batch = schedule.runnableIds.mapNotNull { id -> state.triggers.firstOrNull { it.id == id } }
             if (batch.isEmpty()) {
                 store.save(store.load().let { s ->
                     s.copy(threads = s.threads.map { if (it.key == thread.key) it.copy(queuedTriggerIds = emptyList()) else it })
@@ -98,7 +107,7 @@ class Engine(
             }
 
             // 门禁:只看名单、是否点名、线程上有没有 Ticket;不问模型。
-            val tickets = store.load().tickets.filter { it.threadKey == thread.key }
+            val tickets = schedule.state.tickets.filter { it.threadKey == thread.key }
             val gated = batch.map { it to gate(it, thread.key, policy, tickets) }
             val admitted = gated.filter { it.second.strength != Strength.None }
             val rejected = gated.filter { it.second.strength == Strength.None }
@@ -135,6 +144,81 @@ class Engine(
             trigger.addressed -> GateResult(Strength.Inferred, "bot")
             else -> GateResult(Strength.None, "not_admitted")
         }
+    }
+
+    /** 超时先重排两次;再次超时标为 unavailable。暂停不计时,Router 异常不属于候选超时。 */
+    private fun manageEvalSchedule(state: SuperagentState, threadKey: String, queuedIds: List<String>): EvalSchedule {
+        val runnableIds = mutableListOf<String>()
+        val retainedIds = mutableListOf<String>()
+        val dispositions = state.dispositions.toMutableMap()
+        for (id in queuedIds) {
+            val trigger = state.triggers.firstOrNull { it.id == id }
+            val disposition = dispositions[id]
+            if (trigger == null || disposition == null || disposition.unavailableAtMs != null) continue
+            val paused = disposition.evalPausedUntilMs
+            if (paused != null && now() < paused) {
+                retainedIds += id
+                continue
+            }
+            val deadline = disposition.evalDeadlineAtMs
+            if (deadline == null || now() <= deadline) {
+                runnableIds += id
+                retainedIds += id
+                continue
+            }
+            if (disposition.evalRequeues >= MAX_EVAL_REQUEUES) {
+                dispositions[id] = disposition.copy(unavailableAtMs = now(), requeued = false)
+                continue
+            }
+            dispositions[id] = disposition.copy(
+                admittedAtMs = now(),
+                evalDeadlineAtMs = now() + evalDeadlineMs,
+                evalPausedUntilMs = null,
+                evalRequeues = disposition.evalRequeues + 1,
+                requeued = true,
+            )
+            retainedIds += id
+            runnableIds += id
+        }
+        val nextState = state.copy(
+            threads = state.threads.map { if (it.key == threadKey) it.copy(queuedTriggerIds = retainedIds) else it },
+            dispositions = dispositions,
+        )
+        return EvalSchedule(nextState, runnableIds)
+    }
+
+    /** 暂停期间冻结候选;deadline 按暂停长度顺移。 */
+    fun pauseEval(triggerId: String, untilMs: Long): Boolean {
+        val state = store.load()
+        val disposition = state.dispositions[triggerId] ?: return false
+        if (disposition.unavailableAtMs != null || untilMs <= now()) return false
+        val extension = untilMs - now()
+        val updated = disposition.copy(
+            evalDeadlineAtMs = (disposition.evalDeadlineAtMs ?: now()) + extension,
+            evalPausedUntilMs = untilMs,
+        )
+        store.save(state.copy(dispositions = state.dispositions + (triggerId to updated)))
+        return true
+    }
+
+    fun resumeEval(triggerId: String): Boolean {
+        val state = store.load()
+        val disposition = state.dispositions[triggerId] ?: return false
+        if (disposition.evalPausedUntilMs == null || disposition.unavailableAtMs != null) return false
+        store.save(state.copy(dispositions = state.dispositions + (triggerId to disposition.copy(evalPausedUntilMs = null))))
+        return true
+    }
+
+    /** 面板确认一条不可用候选;记录保留,不再参与 Eval。 */
+    fun dismissUnavailable(triggerId: String): Boolean {
+        val state = store.load()
+        val disposition = state.dispositions[triggerId] ?: return false
+        if (disposition.unavailableAtMs == null) return false
+        store.save(state.copy(
+            threads = state.threads.map { it.copy(queuedTriggerIds = it.queuedTriggerIds - triggerId) },
+            dispositions = state.dispositions + (triggerId to disposition.copy(requeued = false)),
+        ))
+        return true
     }
 
     private fun recordRejected(rejected: List<Pair<Trigger, GateResult>>, outcomes: MutableList<EvalOutcome>) {

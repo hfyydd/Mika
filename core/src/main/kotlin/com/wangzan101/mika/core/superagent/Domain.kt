@@ -122,6 +122,11 @@ data class TriggerDisposition(
     val handbacks: List<Handback> = emptyList(),
     val acked: List<String> = emptyList(),
     val atMs: Long,
+    val admittedAtMs: Long? = null,
+    val evalDeadlineAtMs: Long? = null,
+    val evalPausedUntilMs: Long? = null,
+    val evalRequeues: Int = 0,
+    val unavailableAtMs: Long? = null,
 )
 
 @Serializable
