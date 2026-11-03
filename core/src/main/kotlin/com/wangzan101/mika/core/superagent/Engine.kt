@@ -143,6 +143,14 @@ class Engine(
     private fun gate(trigger: Trigger, threadKey: String, policy: Policy, tickets: List<Ticket>): GateResult {
         val allowed = policy.allows(trigger.source.instance, trigger.actor)
         val threadHasTickets = tickets.isNotEmpty()
+        if (!trigger.isPerson) {
+            // 机器/CI 即使在名单里也不获得 explicit/followup;未名单机器不进推断。
+            return when {
+                allowed && trigger.addressed -> GateResult(Strength.Inferred, "bot_allowlisted")
+                allowed -> GateResult(Strength.None, "bot_requires_address")
+                else -> GateResult(Strength.None, "bot_not_admitted")
+            }
+        }
         return when {
             allowed && trigger.addressed -> GateResult(Strength.Explicit, "addressed")
             allowed && threadHasTickets -> GateResult(Strength.Explicit, "followup")

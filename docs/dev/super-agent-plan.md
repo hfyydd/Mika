@@ -20,7 +20,7 @@
 | 1.4 | handback 与 ack | ✅ 工人退回超范围消息(记账,无人拥有时回归 Eval);ack 认领消息;票结束时未读跟进释放 | 退回消息最终有新判决;已 ack 的不重评 |
 | 1.5 | Eval 生命周期 | ✅ 候选送达起算 deadline;暂停顺移;超时重排 2 次后 unavailable(面板可见、可 dismiss);Router 不可用不烧重试次数 | 每种超时/暂停/恢复路径有测试;unavailable 有记录 |
 | 1.6 | 批内选主与去重 | ✅ 一批取最强(显式>推断,同强取最新)做 Mandate 种子;已开票的 Trigger 判 startedTicket 忽略;followupOwners 命中的先出队 | 同消息双开票不可能;种子字段正确 |
-| 1.7 | 机器门 | bot/CI 单独门线:名单 bot 至多 inferred;无名单 bot 拒;无发送者事件按准入表;`human` 判定来自 Source | 每类机器事件有正反用例 |
+| 1.7 | 机器门 | ✅ bot/CI 单独门线:名单 bot 至多 inferred;无名单 bot 拒;无发送者事件按准入表;`human` 判定来自 Source | 每类机器事件有正反用例 |
 | 1.8 | 两套判决 | 显式请求走轻量 route(现有 orchestrator_route 形态);推断候选走严格评估:逐规则判定+方向+动机引用+宿主校验 | 推断接受缺任一要素被宿主拒绝;两路径测试分离 |
 | 1.9 | 准入表 | 每来源每范围 3×3 格子(名单内外×是否点名),格值 ignore/inferred/explicit;显式格子优先于 followup | 格子配置驱动门禁;默认值与 DSH 一致 |
 | 1.10 | Mandate 重验 | 按 basis 分路径重验:来源还在听、bot 还在名单、格子强度不降、规则仍启用、模式仍 auto;policyEffects 计算受影响票 | 弱化不立即生效,重验时才撤;每 basis 有用例 |

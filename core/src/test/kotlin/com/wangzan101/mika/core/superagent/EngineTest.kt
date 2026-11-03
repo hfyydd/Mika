@@ -340,6 +340,67 @@ class EngineTest {
     }
 
     @Test
+    fun `allowlisted addressed bot is inferred but never explicit`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("bot", actor = "ci-bot", isPerson = false, addressed = true))
+        val outcome = e.evaluateDue(autoPolicy.copy(allowedActors = mapOf("s1" to listOf("alice", "ci-bot"))))[0]
+
+        val created = outcome as EvalOutcome.TicketCreated
+        assertEquals(Strength.Inferred, created.ticket.mandate.strength)
+        assertEquals("bot_allowlisted", created.ticket.mandate.basis)
+    }
+
+    @Test
+    fun `allowlisted unaddressed bot cannot use followup strength`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("person"))
+        e.evaluateDue(autoPolicy)
+
+        e.receive(trigger("ci", actor = "ci-bot", isPerson = false, addressed = false, externalId = "e-ci"))
+        val outcome = e.evaluateDue(autoPolicy.copy(allowedActors = mapOf("s1" to listOf("alice", "ci-bot"))))[0]
+        assertTrue(outcome is EvalOutcome.NotAdmitted)
+        assertEquals("not_admitted:bot_requires_address", (store.load().decisions.getValue("ci") as Decision.Ignore).reason)
+    }
+
+    @Test
+    fun `unlisted bot is rejected even when addressed`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("bot", actor = "unknown-bot", isPerson = false, addressed = true))
+        val outcome = e.evaluateDue(autoPolicy.copy(allowedActors = mapOf("s1" to listOf("ci-bot"))))[0]
+
+        assertTrue(outcome is EvalOutcome.NotAdmitted)
+        assertEquals("not_admitted:bot_not_admitted", (store.load().decisions.getValue("bot") as Decision.Ignore).reason)
+    }
+
+    @Test
+    fun `human classification comes only from source`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        // 名字像 bot,但 Source 判定为人:按人门禁走 explicit。
+        e.receive(trigger("human", actor = "ci-bot"))
+        val outcome = e.evaluateDue(autoPolicy.copy(allowedActors = mapOf("s1" to listOf("ci-bot"))))[0]
+
+        val created = outcome as EvalOutcome.TicketCreated
+        assertEquals(Strength.Explicit, created.ticket.mandate.strength)
+        assertEquals("addressed", created.ticket.mandate.basis)
+    }
+
+    @Test
+    fun `senderless person event follows admission table`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("anon", actor = ""))
+        val outcome = e.evaluateDue(autoPolicy)[0]
+
+        val created = outcome as EvalOutcome.TicketCreated
+        assertEquals(Strength.Inferred, created.ticket.mandate.strength)
+        assertEquals("addressed", created.ticket.mandate.basis)
+    }
+
+    @Test
     fun `watchdog requeues stale assignments`() = runTest {
         val store = MemorySuperagentStore()
         var clock = 1000L
