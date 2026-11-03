@@ -44,6 +44,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SuperagentScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val app = context.applicationContext as com.wangzan101.mika.MikaApp
     val scope = rememberCoroutineScope()
     val store = remember { FileSuperagentSettingsStore(File(context.filesDir, "superagent/settings.json").toPath()) }
     var settings by remember { mutableStateOf(SuperagentSettings()) }
@@ -64,6 +65,7 @@ fun SuperagentScreen(onBack: () -> Unit) {
                 settings = next
                 scope.launch {
                     withContext(Dispatchers.IO) { store.save(next) }
+                    app.superHost.setEnabled(on)
                     if (on) SuperagentRuntimeService.start(context) else SuperagentRuntimeService.stop(context)
                 }
             }) }
@@ -89,7 +91,8 @@ fun SuperagentScreen(onBack: () -> Unit) {
             settings = next
             scope.launch {
                 withContext(Dispatchers.IO) { store.save(next) }
-                if (next.enabled && next.telegramReady) SuperagentRuntimeService.start(context) else SuperagentRuntimeService.stop(context)
+                app.superHost.setEnabled(next.enabled)
+                if (next.enabled) SuperagentRuntimeService.start(context) else SuperagentRuntimeService.stop(context)
             }
         }
     }

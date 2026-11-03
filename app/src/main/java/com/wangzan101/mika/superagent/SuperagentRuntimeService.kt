@@ -12,6 +12,7 @@ import android.os.IBinder
 import com.wangzan101.mika.MikaApp
 import com.wangzan101.mika.R
 import com.wangzan101.mika.core.model.ModelRole
+import com.wangzan101.mika.core.model.ModelSession
 import com.wangzan101.mika.core.superagent.EffectQueue
 import com.wangzan101.mika.core.superagent.Engine
 import com.wangzan101.mika.core.superagent.FileEffectStore
@@ -23,24 +24,30 @@ import com.wangzan101.mika.core.superagent.Runner
 import com.wangzan101.mika.core.superagent.SourceOutbox
 import com.wangzan101.mika.core.superagent.SuperagentRuntime
 import com.wangzan101.mika.core.superagent.SuperagentSettings
-import com.wangzan101.mika.core.superagent.TaskHostExecutor
 import com.wangzan101.mika.core.superagent.TelegramReplyChannel
 import com.wangzan101.mika.core.superagent.TelegramReplyConfig
 import com.wangzan101.mika.core.superagent.TelegramSource
 import com.wangzan101.mika.settings.ProviderStore
+import com.wangzan101.mika.superagent.bridge.SuperagentBridge
+import com.wangzan101.mika.superagent.bridge.SuperagentLocalReplyChannel
+import com.wangzan101.mika.superagent.bridge.SuperagentLocalSource
+import com.wangzan101.mika.superagent.bridge.SuperagentRuntimeHosts
 import com.wangzan101.mika.ui.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
  * 分身层的宿主服务:只装配 core 的 Runtime 与 Mika 的执行端口;不接管 TaskService,也不改既有任务链。
- * Telegram 只在用户显式配置并打开后轮询;策略与副作用都先落盘,服务被杀后可恢复。
+ * 本地聊天不需要 Telegram 配置；Telegram 只在用户配置后作为可选来源叠加。
  */
 class SuperagentRuntimeService : Service() {
+    private val bridge by lazy { SuperagentBridge.get(this) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val localSource = SuperagentLocalSource()
     private var runtime: SuperagentRuntime? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -56,12 +63,15 @@ class SuperagentRuntimeService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val settings = FileSuperagentSettingsStore(settingsFile()).load()
-        if (!settings.enabled || !settings.telegramReady) {
+        if (!settings.enabled) {
             stopSelf()
             return START_NOT_STICKY
         }
         try {
             startRuntime(settings)
+            bridge.setEnabled(true)
+            bridge.registerSource(localSource)
+            SuperagentRuntimeHosts.emitStarted()
             return START_STICKY
         } catch (e: IllegalStateException) {
             stopSelf()
@@ -71,7 +81,11 @@ class SuperagentRuntimeService : Service() {
 
     override fun onDestroy() {
         runtime?.stop()
+        runtime = null
         scope.cancel()
+        SuperagentRuntimeHosts.emitStopped()
+        bridge.unregisterSource()
+        bridge.setEnabled(false)
         super.onDestroy()
     }
 
@@ -79,9 +93,8 @@ class SuperagentRuntimeService : Service() {
         if (runtime != null) return
         val root = dataRoot()
         val policyStore = FilePolicyStore(root.resolve("policy.json").toPath())
-        val policy = mergeTelegramAllowList(policyStore.load(), settings)
-        val model = ProviderStore.get(this).modelFor(ModelRole.Light)
-            ?: ProviderStore.get(this).modelFor(ModelRole.Main)
+        val model = ProviderStore.get(this).modelFor(ModelRole.Light, ModelSession.of("superagent-local"))
+            ?: ProviderStore.get(this).modelFor(ModelRole.Main, ModelSession.of("superagent-local"))
             ?: throw IllegalStateException("super-agent router model unavailable")
 
         val engine = Engine(
@@ -90,40 +103,52 @@ class SuperagentRuntimeService : Service() {
             executor = null,
         )
         val effects = EffectQueue(FileEffectStore(root.resolve("effects.json").toPath()))
-        val telegram = settings.telegram!!
-        val outbox = SourceOutbox(
-            effects,
-            mapOf(
-                "telegram:${telegram.instance}" to TelegramReplyChannel(
+        val channels = buildMap {
+            settings.telegram?.takeIf { settings.telegramReady }?.let { telegram ->
+                put("telegram:${telegram.instance}", TelegramReplyChannel(
                     TelegramReplyConfig(telegram.instance, telegram.token, telegram.baseUrl),
-                ),
-            ),
-        )
+                ))
+            }
+        }
+        val localOutbox = SourceOutbox(effects, channels +
+            ("chat:${LOCAL_SOURCE}" to SuperagentLocalReplyChannel(this)))
+        val telegram = settings.telegram.takeIf { settings.telegramReady }
         val runner = Runner(
             engine,
             TicketHostTaskExecutor(this) { engine.snapshot() },
             effects,
-            outbox,
+            localOutbox,
         )
         runtime = SuperagentRuntime(
             engine = engine,
             runner = runner,
-            policy = { mergeTelegramAllowList(policyStore.load(), settings) },
-            sources = listOf(TelegramSource(telegram)),
+            policy = { mergePolicy(policyStore.load(), settings, localSource) },
+            sources = listOfNotNull(localSource, telegram?.let { TelegramSource(it) }),
             effects = effects,
-            outbox = outbox,
+            outbox = localOutbox,
         ).also { it.start(scope, settings.pollIntervalMs) }
     }
 
-    private fun mergeTelegramAllowList(policy: com.wangzan101.mika.core.superagent.Policy, settings: SuperagentSettings) =
+    private fun mergePolicy(
+        policy: com.wangzan101.mika.core.superagent.Policy,
+        settings: SuperagentSettings,
+        localSource: SuperagentLocalSource,
+    ): com.wangzan101.mika.core.superagent.Policy {
+        var merged = policy
         settings.telegram?.takeIf { it.allowFrom.isNotEmpty() }?.let { telegram ->
-            val current = policy.allowedActors[telegram.instance].orEmpty()
-            if (telegram.allowFrom.all { it in current }) {
-                policy
-            } else {
-                policy.copy(allowedActors = policy.allowedActors + (telegram.instance to (current + telegram.allowFrom)))
+            val current = merged.allowedActors[telegram.instance].orEmpty()
+            if (telegram.allowFrom.any { it !in current }) {
+                merged = merged.copy(allowedActors = merged.allowedActors +
+                    (telegram.instance to (current + telegram.allowFrom)))
             }
-        } ?: policy
+        }
+        val localActors = merged.allowedActors[LOCAL_SOURCE].orEmpty()
+        if ("owner" !in localActors) {
+            merged = merged.copy(allowedActors = merged.allowedActors +
+                (LOCAL_SOURCE to (localActors + "owner")))
+        }
+        return merged
+    }
 
     private fun startInForeground() {
         val openApp = PendingIntent.getActivity(
@@ -149,6 +174,7 @@ class SuperagentRuntimeService : Service() {
     private fun settingsFile() = File(dataRoot(), "settings.json").toPath()
 
     companion object {
+        const val LOCAL_SOURCE = "local"
         private const val CHANNEL_ID = "superagent_runtime"
         private const val NOTIFICATION_ID = 3101
 

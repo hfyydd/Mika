@@ -322,6 +322,11 @@ class ChatViewModel(
     private val endedRunIds: StateFlow<Map<String, String?>>? = null,
     /** 开关 parallelTasks:打开时不同对话的任务可以同时跑,界面只跟着屏上这个对话的任务。界面没在跟任务时重读。 */
     private val parallelFlag: () -> Boolean = { false },
+    /** Super 模式：用户打开侧栏 Super 后才走这个桥；传空时保持原行为。 */
+    private val superMode: StateFlow<Boolean> = MutableStateFlow(false),
+    /** 原话送到 Super 层；false 时回复调用方，走普通 Mika 本体任务。 */
+    private val beginSuper: (String, String) -> Boolean = { _, _ -> false },
+
     /** 服务显示中的任务:(对话, 状态),两者一起写;并行时用它代替 [taskState],别的对话的状态不进来。 */
     private val shownTask: StateFlow<Pair<String, TaskState>?> = MutableStateFlow(null),
     /** 正在跑或排队的任务所在的对话。 */
@@ -680,7 +685,14 @@ class ChatViewModel(
             _ui.update { it.copy(blocked = check.blockers) }
             return false
         }
-        begin(goal, ui.conversationId ?: store.newConversation())
+        val id = ui.conversationId ?: store.newConversation()
+        if (superMode.value && beginSuper(goal, id)) {
+            _ui.update {
+                it.copy(conversationId = id, composer = ComposerMode.Busy)
+            }
+            return true
+        }
+        begin(goal, id)
         return true
     }
 

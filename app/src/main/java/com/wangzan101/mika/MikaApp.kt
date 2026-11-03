@@ -66,6 +66,7 @@ import com.wangzan101.mika.task.ResourceScheduler
 import com.wangzan101.mika.task.RemoteTaskHub
 import com.wangzan101.mika.task.FileChildRunStore
 import com.wangzan101.mika.task.TriggerRuntime
+import com.wangzan101.mika.superagent.bridge.MikaSuperRuntimeHost
 
 /**
  * App 容器:进程里共用的服务都在这里建一份,经各自的 Owner 接口交给安卓入口(界面、服务、广播、provider),
@@ -73,6 +74,7 @@ import com.wangzan101.mika.task.TriggerRuntime
  */
 class MikaApp : Application(), WebOwner, SandboxOwner, TaskEnvironment.Owner, PhoneServices.Owner,
     MemoryRuntime.Owner, ProviderStore.Owner, FileRouteStore.Owner, TaskRecovery.Owner {
+    val superHost by lazy { MikaSuperRuntimeHost(this) }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** 手机能力的服务:内置助手、共用的 shell 连接、配对、「去设置」提示。 */
@@ -286,6 +288,8 @@ class MikaApp : Application(), WebOwner, SandboxOwner, TaskEnvironment.Owner, Ph
             liveRunId = { taskState.run(it)?.runId?.value },
             endedRunIds = taskState.endedRunIds,
             parallelFlag = { FeatureFlags.get(app).speedFlags().parallelTasks },
+            superMode = superHost.superMode,
+            beginSuper = { goal, conversationId -> superHost.beginSuper(goal, conversationId) },
             shownTask = taskState.shownTask,
             activeConversations = taskState.activeConversations,
             runGoal = { taskState.run(it)?.goal },
