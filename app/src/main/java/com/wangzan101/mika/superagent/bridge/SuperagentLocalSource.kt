@@ -24,7 +24,7 @@ class SuperagentLocalSource : Source {
             id = "chat:$conversationId:$externalId",
             source = SourceRef(kind, SOURCE_INSTANCE),
             externalId = externalId,
-            threadKey = conversationId,
+            threadKey = "chat:$conversationId",
             actor = actor,
             isPerson = true,
             addressed = true,

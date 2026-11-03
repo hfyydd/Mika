@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
  */
 class SuperagentLocalReplyChannel(private val context: Context) : ReplyChannel {
     override suspend fun send(envelope: ReplyEnvelope): String = withContext(Dispatchers.IO) {
-        val conversationId = envelope.threadKey
+        val conversationId = envelope.threadKey.removePrefix("chat:")
         if (envelope.source.kind != ChatSourceKinds.CHAT) return@withContext ""
         val text = envelope.text.ifBlank { return@withContext "empty:local" }
         ConversationStore.shared(context).append(

@@ -60,7 +60,12 @@ class AndroidAgentHost(private val context: Context) : TaskHost {
     private val app = context.applicationContext as MikaApp
 
     override suspend fun run(spec: RunSpec): ChildResult {
-        val conversationId = ConversationStore.shared(context).newConversation()
+        val conversationId = if (spec.threadId.startsWith("chat:")) {
+            // 本地 Super 的会话上下文就是用户原来的那段聊天
+            spec.threadId.removePrefix("chat:")
+        } else {
+            ConversationStore.shared(context).newConversation()
+        }
         val resources = ResourceScope()
         var connection: ShellBinding? = null
         var connectedScreen: AndroidScreen? = null
