@@ -13,6 +13,7 @@ class SuperagentRuntime(
     private val policy: suspend () -> Policy,
     private val sources: List<Source> = emptyList(),
     private val effects: EffectQueue? = null,
+    private val outbox: SourceOutbox? = null,
 ) {
     private var loop: Job? = null
 
@@ -67,6 +68,7 @@ class SuperagentRuntime(
                     pollOnce()
                     evaluateOnce()
                     watchdogOnce()
+                    outbox?.flush()
                 } catch (e: kotlinx.coroutines.CancellationException) {
                     throw e
                 } catch (_: Exception) {

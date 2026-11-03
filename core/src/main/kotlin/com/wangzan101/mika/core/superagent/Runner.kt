@@ -9,6 +9,7 @@ class Runner(
     private val engine: Engine,
     private val executor: SuperExecutor,
     private val effects: EffectQueue? = null,
+    private val outbox: SourceOutbox? = null,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
 
@@ -20,27 +21,52 @@ class Runner(
         if (!ticket.isOpen) return false
         if (effects == null) return execute(assignmentId, ticket)
         effects.submit("assignment:$assignmentId", EffectKind.Assignment, ticket.id, assignmentId)
+        var report: ExecutorReport? = null
         effects.drain { record ->
             if (record.id == "assignment:$assignmentId") {
-                execute(assignmentId, ticket)
+                report = runAndReport(assignmentId, ticket)
                 "assignment:$assignmentId"
             } else {
                 error("queue is blocked by ${record.id}")
             }
         }
+        report?.let { reply(assignmentId, ticket, it) }
         return true
     }
 
     private suspend fun execute(assignmentId: String, ticket: Ticket): Boolean {
+        runAndReport(assignmentId, ticket)
+        return true
+    }
+
+    private suspend fun runAndReport(assignmentId: String, ticket: Ticket): ExecutorReport {
         engine.assignmentStarted(assignmentId)
         return try {
             val report = executor.run(ticket, threadSummary(engine, ticket.threadKey))
             engine.report(assignmentId, report)
-            true
+            report
         } catch (e: Exception) {
-            engine.report(assignmentId, ExecutorReport(ReportState.Failed, "执行失败: ${e.message ?: e::class.simpleName}"))
-            true
+            val report = ExecutorReport(ReportState.Failed, "执行失败: ${e.message ?: e::class.simpleName}")
+            engine.report(assignmentId, report)
+            report
         }
+    }
+
+    /** 结果只作为副作用排队;真正发回原来的来源实例由 outbox 在安全点执行。 */
+    private suspend fun reply(assignmentId: String, ticket: Ticket, report: ExecutorReport) {
+        val outbox = outbox ?: return
+        val state = engine.snapshot()
+        val current = state.assignments.firstOrNull { it.id == assignmentId } ?: return
+        val shouldReply = when (current.state) {
+            ReportState.Ready, ReportState.Blocked, ReportState.Waiting, ReportState.Failed, ReportState.Dropped -> true
+            ReportState.Progress -> false
+            null -> false
+        }
+        if (!shouldReply) return
+        val text = current.question.ifBlank { current.result.ifBlank { if (current.state == ReportState.Ready) "done" else return } }
+        val triggerId = ticket.triggerIds.firstOrNull() ?: return
+        val trigger = state.triggers.firstOrNull { it.id == triggerId } ?: return
+        outbox.enqueue(ticket, trigger, text)
     }
 
     private fun threadSummary(engine: Engine, threadKey: String): String {
