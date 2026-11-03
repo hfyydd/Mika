@@ -98,6 +98,18 @@
 | 4. 策略与界面 | 名单/准入表/模式设置;面板阶段表;person 通知 | 面板只显示需要人的票 |
 | 5. 放开 | Observe 审计后逐来源开 Auto;人格与记忆调教 | Observe 日志人工审计通过 |
 
+## 与上游同步
+
+全部工作在 fork 的独立分支上,对上游**零删改**:只新增包(`core/superagent/`、`core/autonomy/`)与文档,唯一触碰的既有文件是 `docs/dev/README.md` 的两行索引。同步上游的固定动作:
+
+```bash
+git fetch upstream
+git merge upstream/main        # 在本项目的功能分支上
+./gradlew :core:test           # 依赖方向、文档一致性、全部领域测试
+```
+
+两条守则:新代码一律放进新包,冲突风险为零;既有的 `PackageDependencyTest` 与 `DocsConsistencyTest` 是同步后的第一道回归,合并后先跑它们。
+
 ## 我们不做什么
 
 - **不碰微信个人号协议**:封号红线;合规渠道(飞书/钉钉/企微/Telegram)已够用,微信场景留给企业微信路线。
