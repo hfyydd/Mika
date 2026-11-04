@@ -47,7 +47,7 @@ class FileEffectStore(private val path: Path) : EffectStore {
     private fun load(): List<EffectRecord> {
         if (!Files.exists(path)) return emptyList()
         return try {
-            json.decodeFromString<List<EffectRecord>>(Files.readString(path))
+            json.decodeFromString<List<EffectRecord>>(path.toFile().readText())
         } catch (_: Exception) {
             emptyList()
         }
@@ -60,7 +60,7 @@ class FileEffectStore(private val path: Path) : EffectStore {
         val records = memory.all()
         val tmp = path.resolveSibling(path.fileName.toString() + ".tmp")
         Files.createDirectories(path.parent)
-        Files.writeString(tmp, json.encodeToString(records))
+        tmp.toFile().writeText(json.encodeToString(records))
         Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     }
 }

@@ -174,7 +174,7 @@ class SuperagentRuntimeService : Service() {
             .setOngoing(true)
             .build()
         try {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } catch (_: IllegalArgumentException) {
             startForeground(NOTIFICATION_ID, notification)
         }

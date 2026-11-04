@@ -177,11 +177,7 @@
         <service
             android:name=".superagent.SuperagentRuntimeService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Keeps the user-enabled autonomous super-agent runtime connected to its configured external source while long-running tickets execute on Mika's own task host" />
-        </service>
+            android:foregroundServiceType="dataSync" />
 
         <!-- 用 ChatGPT 登录期间:用户在浏览器里登录时撑住进程,本机回调才有人接;登录一结束就停 -->
         <service

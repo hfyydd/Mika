@@ -43,7 +43,7 @@ class FileSuperagentStore(private val path: Path) : SuperagentStore {
     override fun load(): SuperagentState {
         if (!Files.exists(path)) return SuperagentState()
         return try {
-            json.decodeFromString<SuperagentState>(Files.readString(path))
+            json.decodeFromString<SuperagentState>(path.toFile().readText())
         } catch (_: Exception) {
             SuperagentState()
         }
@@ -52,7 +52,7 @@ class FileSuperagentStore(private val path: Path) : SuperagentStore {
     override fun save(state: SuperagentState) {
         val tmp = path.resolveSibling(path.fileName.toString() + ".tmp")
         Files.createDirectories(path.parent)
-        Files.writeString(tmp, json.encodeToString(state))
+        tmp.toFile().writeText(json.encodeToString(state))
         Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     }
 }

@@ -35,7 +35,7 @@ class FileGoalStore(private val path: Path) : GoalStore {
     private fun load(): List<Goal> {
         if (!Files.exists(path)) return emptyList()
         return try {
-            json.decodeFromString<GoalSnapshot>(Files.readString(path)).goals
+            json.decodeFromString<GoalSnapshot>(path.toFile().readText()).goals
         } catch (_: Exception) { emptyList() }
     }
 
@@ -43,7 +43,7 @@ class FileGoalStore(private val path: Path) : GoalStore {
         val snapshot = GoalSnapshot(memory.all())
         val tmp = path.resolveSibling(path.fileName.toString() + ".tmp")
         Files.createDirectories(path.parent)
-        Files.writeString(tmp, json.encodeToString(snapshot))
+        tmp.toFile().writeText(json.encodeToString(snapshot))
         Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
     }
 
