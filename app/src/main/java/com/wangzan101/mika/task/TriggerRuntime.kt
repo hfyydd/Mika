@@ -23,10 +23,9 @@ import com.wangzan101.mika.core.trigger.TriggerEngine
 import com.wangzan101.mika.core.trigger.ConditionOutcome
 import com.wangzan101.mika.core.trigger.TriggerSnapshot
 import com.wangzan101.mika.core.trigger.TriggerWindowState
+import com.wangzan101.mika.core.trigger.rescheduledTo
 import java.io.File
-import java.time.Instant
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -67,6 +66,17 @@ object TriggerRuntime {
     }
 
     @Synchronized fun rearm(context: Context) { engine(context, store(context)).rearm(System.currentTimeMillis()) }
+
+    /** 设备时区变化后,跟随旧设备时区的当地时间计划重算到新时区;显式钉了其他时区的不动。没有基线(首次使用)就只记下当前时区。 */
+    @Synchronized fun syncTimeZone(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val current = ZoneId.systemDefault().id
+        val previous = prefs.getString(KEY_DEVICE_ZONE, null)
+        prefs.edit().putString(KEY_DEVICE_ZONE, current).apply()
+        if (previous == null || previous == current) return
+        engine(context, store(context)).rezone(System.currentTimeMillis(), previous, ZoneId.of(current))
+    }
+
     @Synchronized fun fire(context: Context) { engine(context, store(context)).fire(System.currentTimeMillis()) }
 
     @Synchronized fun delivered(context: Context, key: String) {
@@ -124,11 +134,9 @@ object TriggerRuntime {
         TriggerSnapshot(it.all(), it.windows())
     }
 
-    @Synchronized fun setEnabled(context: Context, id: String, enabled: Boolean) {
-        val store = store(context)
-        store.get(id)?.let { store.upsert(it.copy(enabled = enabled)) }
-        engine(context, store).rearm(System.currentTimeMillis())
-    }
+    /** 暂停或恢复;改不了(没有这个计划、恢复跑过的一次性计划)时返回 false,见 [TriggerEngine.setEnabled]。 */
+    @Synchronized fun setEnabled(context: Context, id: String, enabled: Boolean): Boolean =
+        store(context).let { engine(context, it).setEnabled(id, enabled, System.currentTimeMillis()) }
 
     @Synchronized fun remove(context: Context, id: String) {
         val store = store(context)
@@ -139,11 +147,7 @@ object TriggerRuntime {
     @Synchronized fun reschedule(context: Context, id: String, nextAtMs: Long) {
         val store = store(context)
         store.get(id)?.let { trigger ->
-            val local = trigger.calendarZone?.let { zone ->
-                DateTimeFormatter.ofPattern("HH:mm").format(Instant.ofEpochMilli(nextAtMs).atZone(ZoneId.of(zone)))
-            }
-            store.upsert(trigger.copy(nextAtMs = nextAtMs, enabled = true,
-                calendarTime = if (trigger.calendarTime != null) local else null))
+            store.upsert(trigger.rescheduledTo(nextAtMs))
         }
         engine(context, store).rearm(System.currentTimeMillis())
     }
@@ -264,6 +268,7 @@ object TriggerRuntime {
     private const val ACTION = "com.wangzan101.mika.task.TRIGGER_ALARM"
     private const val PREFS = "triggers"
     private const val PROMPTED = "exact_alarm_prompted"
+    private const val KEY_DEVICE_ZONE = "device_timezone"
 }
 
 /** 准时闹钟权限的引导:没开时只主动提醒一次,之后在定时任务页一直写明。 */

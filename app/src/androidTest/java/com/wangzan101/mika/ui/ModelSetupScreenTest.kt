@@ -52,7 +52,7 @@ class ModelSetupScreenTest {
         selectPreset = { calls += "preset $it" }, testAndSave = { calls += "test" }, openForm = { calls += "open form" },
         saveUntested = { calls += "save untested" },
         openProvider = { calls += "provider $it" }, pickRole = { calls += "role $it" }, next = { calls += "next" },
-        openSignIn = { calls += "signin $it" },
+        openUsage = { calls += "usage" }, openSignIn = { calls += "signin $it" },
     )
 
     private val form = AddForm.of(ProviderPresets.all.first()).copy(apiKey = "sk")
@@ -119,6 +119,7 @@ class ModelSetupScreenTest {
     @Test fun settingsPageShowsAllThreeRolesWithoutBottomButton() {
         show(connected(RoleChoices(main = "c1", vision = RoleChoice.Off, light = RoleChoice.SameAsMain)), onboarding = false)
         compose.onNodeWithText(ModelsCopy.TITLE).assertIsDisplayed()
+        compose.onNodeWithText(ModelsCopy.LEAD).assertDoesNotExist()
         // 改动当场生效,左上角返回就行
         compose.onNodeWithTag("setup-next").assertDoesNotExist()
         ModelRole.entries.forEach { compose.onNodeWithText(ModelsCopy.roleLabel(it)).assertIsDisplayed() }
@@ -127,6 +128,15 @@ class ModelSetupScreenTest {
         compose.onNodeWithText(ModelsCopy.SAME_AS_MAIN).assertIsDisplayed()
         compose.onNodeWithTag("role-light").performClick()
         assertEquals(listOf("role Light"), calls)
+    }
+
+    @Test fun settingsPageOpensTokenUsageButOnboardingDoesNotShowIt() {
+        show(connected(), onboarding = false)
+        compose.onNodeWithText(UsageCopy.TITLE).performScrollTo().performClick()
+        assertEquals(listOf("usage"), calls)
+        calls.clear()
+        show(connected(), onboarding = true)
+        compose.onNodeWithText(UsageCopy.TITLE).assertDoesNotExist()
     }
 
     @Test fun contextFormValidatesPreviewsAndSavesTheModelUsedForNewTasks() {

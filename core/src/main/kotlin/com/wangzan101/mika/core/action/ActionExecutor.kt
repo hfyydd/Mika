@@ -131,7 +131,7 @@ class ActionExecutor(
         when (d) {
             is Decision.Required -> return blocked(call, args, origin, before, d.hit, null, followUp)
             is Decision.Mismatch -> return blocked(call, args, origin, before, d.hit, d.reason, followUp)
-            Decision.Denied -> return refuse("approval_unavailable", origin, before)
+            is Decision.Denied -> return approvalUnavailable(call, args, origin, before, d.hit, followUp)
             Decision.Unresolved -> return refuse("target_unresolved", origin, before)
             Decision.OwnApp -> return ownApp(call, args, origin, before, followUp)
             else -> Unit
@@ -222,7 +222,10 @@ class ActionExecutor(
         val after = subVerdicts.toMutableList()
         after += if (s.offScreen) offScreen?.result(call.name, s.args, resolved.content).orEmpty() else guards.result(call.name, resolved.content)
         // 动作报回的实际效果先记(没有效果、换了地方),接着的画面就不再按指纹重复记
-        ((resolved.content["effect"] as? JsonObject)?.get("kind") as? JsonPrimitive)?.takeIf { !s.offScreen }?.let { after += guards.effect(it.content) }
+        (resolved.content["effect"] as? JsonObject)?.takeIf { !s.offScreen }?.let { effect ->
+            val kind = (effect["kind"] as? JsonPrimitive)?.content ?: return@let
+            after += guards.effect(kind, (effect["treeBlind"] as? JsonPrimitive)?.booleanOrNull == true)
+        }
         val elements = resolved.screenElements ?: resolved.content["elements"] as? JsonArray
         val beforeFrameProgress = guards.progressVersion
         elementsHash(elements)?.let { after += guards.frame("$n:${call.id}", it) }
@@ -303,6 +306,18 @@ class ActionExecutor(
 
     private fun refuse(code: String, origin: Origin, before: List<GuardVerdict>) =
         ActionOutcome.Refused(code, Refusals.content(code, origin.policy.refusals, before, null, null), before)
+
+    private fun approvalUnavailable(
+        call: Part.ToolCall, args: JsonObject, origin: Origin, before: List<GuardVerdict>, hit: Irreversible, followUp: FollowUp,
+    ): ActionOutcome {
+        val code = "approval_unavailable"
+        val content = Refusals.content(code, origin.policy.refusals, before, hit, null)
+        if (origin.policy.recordsRefusal) {
+            followUp.refused(content)
+            recorder.result(origin.step, call.name, tools.verb(call.name), content, tools.portRecord(call.name, args), null, null, 0, origin.policy.source, call.id)
+        }
+        return ActionOutcome.Refused(code, content, before, hit)
+    }
 
     private fun blocked(
         call: Part.ToolCall, args: JsonObject, origin: Origin, before: List<GuardVerdict>, hit: Irreversible, reason: String?, followUp: FollowUp,

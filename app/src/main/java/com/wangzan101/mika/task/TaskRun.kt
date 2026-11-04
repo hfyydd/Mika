@@ -159,6 +159,16 @@ class TaskRun(
     internal var mcpExternalId: String? = null
     internal val conditionCheck get() = triggerActionGoal != null
     @Volatile private var children: ChildAgentRunner? = null
+    /** 这次任务连上的外部 MCP server;结束时关闭会话。 */
+    @Volatile private var mcpConnections: com.wangzan101.mika.settings.McpConnections? = null
+
+    /**
+     * 这次任务接上的全部外部 MCP 端点,交给 toolDispatcher 的就这一份。别的来源(以后的扩展等)也提供这类端点时在这里拼上,
+     * 不给 toolDispatcher 另加参数;各来源连上的都要归任务的 ResourceScope,收尾时一起关。
+     */
+    private fun mcpEndpoints(): List<com.wangzan101.mika.core.cap.mcp.McpConnection> = buildList {
+        mcpConnections?.let { addAll(it.connections) }
+    }
     /** 自己的一份;显示中时同步写到服务对外的那份。[show] 时整份抄过去。 */
     /** App 给的模型来源、评测钩子、屏幕画面的开关。 */
     private val env = TaskEnvironment.of(service)
@@ -254,6 +264,12 @@ class TaskRun(
     @Volatile var muteFailedFor: String? = null
         private set
     @Volatile private var awake: KeepAwake? = null
+    /**
+     * 收尾时还有任务排着:先替接班的拿一份屏幕锁再放开自己的,服务收尾时交给放出来的那个,它开跑拿上自己那份后放开;
+     * 没人接班、或没跑起来就结束了,由服务放开。否则这里一放开,屏幕若已过了系统的熄屏时间就当场熄掉,
+     * 接班的拿锁点不亮屏幕,一开跑就停在等解锁。重复放开不会多算(见 [SharedWakeLock])。
+     */
+    @Volatile internal var wakeHandoff: WakeLockPort? = null
     /** shell 进程没了,虚拟屏和上面的 App 一起没了;任务没法接着做。 */
     @Volatile var shellDied = false
         internal set
@@ -469,6 +485,12 @@ class TaskRun(
         )
         sideScope = side
         try {
+            // 用户在「干活时」关掉了常亮就不拿唤醒锁;开跑就按此刻的状态(准备中)拿上:
+            // 开模型、读知识、选路线、判断意图这些第一步之前的准备和推理期间屏幕也不熄
+            awake = if (FeatureFlags.get(service).keepScreenOn()) KeepAwake(service.wakeLock.lease(), side).also { it.onState(_state.value) } else null
+            // 前一个任务替这个拿着的那份,自己的拿上了就放开
+            wakeHandoff?.release()
+            wakeHandoff = null
             val model = env.modelFactory(service, session) ?: return TaskState.Failed(tr(R.string.fail_no_main_model), FailKind.Environment)
             // 用户在浏览器页上对着一页问的:那一页借给这个任务当当前网页标签(见 PageLoans);开跑时页面还开着才借得到
             val pageLoan = if (provenance.origin == RunOrigin.Ui) withContext(Dispatchers.Main) { UserBrowser.existing()?.claim(conversationId, key) } else null
@@ -494,7 +516,7 @@ class TaskRun(
                 catch (_: com.wangzan101.mika.core.access.AppAccessDenied) { false }
             }
             val metrics = mainScreenMetrics()
-            // 在 App 里操作的节奏(设置 › 干活时);评测、真机验收按钩子覆盖
+            // 在 App 里操作的节奏(设置 › 任务运行);评测、真机验收按钩子覆盖
             val pace = env.evalHooks.operatingPace ?: FeatureFlags.get(service).operatingPace()
             // 助手是否连着;没接上手机之前当作连着(网页、沙箱的步骤不看它)
             val shellUp = MutableStateFlow(true)
@@ -526,7 +548,7 @@ class TaskRun(
                 shellBinder = shell.asBinder()
                 side.launch { conn.shell.map { it != null }.collect { shellUp.value = it } }
                 val agentDisplay = LazyAgentDisplay(metrics.widthPixels, metrics.heightPixels) {
-                    suspend fun create() = resources.acquire(Dispatchers.IO, AgentDisplay::release) { AgentDisplay(shell, metrics.widthPixels, metrics.heightPixels, metrics.densityDpi) }
+                    suspend fun create() = resources.acquire(Dispatchers.IO, AgentDisplay::release) { AgentDisplay(shell, metrics.widthPixels, metrics.heightPixels, metrics.densityDpi, service.getSystemService(DisplayManager::class.java)) }
                     try {
                         create()
                     } catch (e: Exception) {
@@ -606,8 +628,6 @@ class TaskRun(
                 t != null && t.taskId >= 0 && moveBackToAgent(t.taskId)
             }
             gate = taskGate
-            // 用户在「干活时」关掉了常亮就不拿唤醒锁
-            awake = if (FeatureFlags.get(service).keepScreenOn()) KeepAwake(service.wakeLock.lease(), side) else null
             // 记录开不起来就不记,任务照跑
             val sink: RunSink = withContext(Dispatchers.IO) {
                 runCatching {
@@ -685,9 +705,28 @@ class TaskRun(
             }
             // 这个对话里用户发来的屏幕(跟着对话存在工作区里)
             val userScreens = (service.application as MikaApp).userScreens.source(conversationId)
+            val stepLimit = if (conditionCheck) null else FeatureFlags.get(service).taskStepLimit()
             val runSpec = RunSpec(RunId(key), goal, conversationId,
                 priorTurns,
-                provenance, if (conditionCheck) setOf("web", "sandbox") else null, readOnly = conditionCheck)
+                provenance, if (conditionCheck) setOf("web", "sandbox") else null, readOnly = conditionCheck,
+                stepBudget = stepLimit)
+            // 外部 MCP server 只在主任务接;子任务/条件检查/评测不接,避免绕过父任务审批、影响评测可复现
+            if (!conditionCheck) {
+                // 连上的当场归 resources:收尾(含取消、失败、连到一半被停)关作用域时一起关,stdio server 的进程和沙箱租约跟着放掉
+                mcpConnections = (service.application as MikaApp).mcpServers.connectionsFor(
+                    resources,
+                    com.wangzan101.mika.mcp.ConversationMcpResultStore(SandboxDirs(service), conversationId),
+                    conversationId,
+                )
+                // 连接失败、超过总时限没连上的只在任务卡片上提示一句,不打断任务;详情在设置页的健康状态里
+                mcpConnections?.failures?.takeIf { it.isNotEmpty() }?.let { failures ->
+                    val store = (service.application as MikaApp).mcpServers
+                    val names = store.servers.value.associate { it.id to it.name }
+                    (_state.value as? TaskState.Running)?.let {
+                        publish(it.copy(note = tr(R.string.mcp_servers_run_failed, failures.joinToString(", ") { f -> names[f.first] ?: f.first })))
+                    }
+                }
+            }
             val runApproval = approvalControl.start(remote = provenance.origin == RunOrigin.Mcp).also { approval = it }
             val childRunner = if (provenance.origin == RunOrigin.Ui && web != null) ChildAgentRunner(
                 create = { childSpec ->
@@ -739,7 +778,8 @@ class TaskRun(
                 // 用户要求时写下或改写个人技能(和自学收下的放在同一处,设置里立刻能看到)
                 personalSkills = memoryRuntime.skills(),
                 // 这个对话之前几轮的运行记录(只读;history_read 只认 runSpec 里这个对话的轮次)
-                runRecords = RunStore(service).reader())
+                runRecords = RunStore(service).reader(),
+                mcpServers = mcpEndpoints())
             dispatcher = tools
             val agent = AgentLoop(
                 model, tools,
@@ -759,7 +799,7 @@ class TaskRun(
                         challengedSites = withContext(Dispatchers.IO) { registry.challengedSites() },
                     )
                 },
-                maxSteps = env.evalHooks.maxSteps ?: AgentLoop.UNLIMITED_STEPS,
+                maxSteps = env.evalHooks.maxSteps ?: runSpec.stepBudget ?: AgentLoop.UNLIMITED_STEPS,
                 reviewFinalAnswer = false,
                 inputTimeoutMs = TaskService.INPUT_TIMEOUT_MS,
                 // 询问 / 自主:询问时只有花钱的一步先问(有确认关卡和 request_confirmation);自主时连付款也不问。
@@ -887,11 +927,15 @@ class TaskRun(
             _frames.value = null
             _webOpen.value = false
             synchronized(publishLock) { ended = true }
+            if (awake != null && service.hasQueuedRuns()) wakeHandoff = service.wakeLock.lease().also { it.acquire() }
             awake?.close()
             awake = null
             shellDeath?.let { d -> runCatching { shellBinder?.unlinkToDeath(d, 0) } }
             loop = null
             children = null
+            // 早点关:后面收尾要等屏和网页;resources 关时还会再关一次(只关一次,不重复)
+            mcpConnections?.close()
+            mcpConnections = null
             mcpEvents?.close()
             liveFeed?.close()
             approval?.let { approvalControl.end(it) }

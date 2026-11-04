@@ -80,9 +80,11 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -104,6 +106,7 @@ import com.wangzan101.mika.ui.theme.MikaIcons
 import com.wangzan101.mika.ui.theme.MikaMotion
 import com.wangzan101.mika.ui.theme.MikaShapes
 import com.wangzan101.mika.ui.theme.MikaTheme
+import com.wangzan101.mika.voice.HoldToTalk
 import kotlinx.coroutines.flow.first
 
 private val CardShape = RoundedCornerShape(22.dp)
@@ -135,6 +138,10 @@ object CardCopy {
     val SCREEN_LABEL: String get() = tr(R.string.card_screen_label)
     val ZOOMED: String get() = tr(R.string.card_zoomed)
     val ZOOM_HINT: String get() = tr(R.string.card_zoom_hint)
+    val HIDE_CAPSULE: String get() = tr(R.string.capsule_hide)
+
+    /** 关掉胶囊后的提示:到哪里重新打开(「设置 › 悬浮胶囊」,名字和设置里的一致)。 */
+    fun hiddenHint(): String = tr(R.string.capsule_hidden_hint, tr(R.string.settings_title), tr(R.string.capsule_settings_title))
 }
 
 /** 卡片上的按钮;都转成任务服务现有的动作(见 [CapsuleController])。[runKey] 是按下时那件事的编号。 */
@@ -163,6 +170,8 @@ interface CardActions {
     fun dropScreen()
     /** 留在后台运行的那一页的卡片上的「关闭网页」。 */
     fun closeKeptPage() {}
+    /** 卡片最底下的「关闭悬浮胶囊」:设置里的开关改成关闭,胶囊和卡片当场收掉(任务照常跑、照常发通知)。 */
+    fun hideCapsule() {}
 }
 
 /** 截下来、挂在输入框上面等着发的一屏:[thumb] 是缩略图(不让截图的页面没有)。 */
@@ -175,6 +184,12 @@ data class PendingScreen(val shot: CapturedScreen, val thumb: ImageBitmap?)
 data class CardInputUi(val open: Boolean = false, val draft: String = "", val screen: PendingScreen? = null) {
     /** 写了字或挂着一屏:可以发。 */
     val canSend: Boolean get() = draft.isNotBlank() || screen != null
+
+    /** 卡片收起、胶囊藏起时:输入框收起,截下的那一屏不留,没发出的字留着,下次展开接着改。 */
+    fun collapsed(): CardInputUi = CardInputUi(draft = draft)
+
+    /** 说的话接在没发出的字后面(和对话页输入框同一个接法)。 */
+    fun withSpoken(text: String): CardInputUi = copy(draft = HoldToTalk.join(draft, text))
 }
 
 /**
@@ -375,6 +390,9 @@ private fun InputField(field: CardInput, ui: CardInputUi, actions: CardActions, 
         focus.requestFocus()
         keyboard?.show()
     }
+    // 和对话页一样:打开时、外面的字一变(说完接上来),光标放到末尾,接着打都在后面
+    var fieldValue by remember { mutableStateOf(TextFieldValue(ui.draft, TextRange(ui.draft.length))) }
+    val shownValue = if (fieldValue.text == ui.draft) fieldValue else TextFieldValue(ui.draft, TextRange(ui.draft.length))
     Row(
         Modifier.fillMaxWidth().heightIn(min = 42.dp).clip(shape).background(c.ink.copy(alpha = 0.05f))
             .border(1.dp, c.accent.copy(alpha = 0.5f), shape).padding(start = 12.dp, end = 4.dp),
@@ -383,7 +401,7 @@ private fun InputField(field: CardInput, ui: CardInputUi, actions: CardActions, 
         Box(Modifier.weight(1f).padding(vertical = 10.dp)) {
             if (ui.draft.isEmpty()) Text(field.hint, style = Body, color = c.ink3, maxLines = 1)
             BasicTextField(
-                ui.draft, actions::draft,
+                shownValue, { v -> fieldValue = v; if (v.text != ui.draft) actions.draft(v.text) },
                 Modifier.testTag("capsule-field").fillMaxWidth().focusRequester(focus).semantics { contentDescription = field.hint },
                 textStyle = Body.copy(color = c.ink), maxLines = 4, cursorBrush = SolidColor(c.accent),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
@@ -523,9 +541,7 @@ private fun Detail(
             }
         }
         input()
-        Box(Modifier.fillMaxWidth().padding(top = 6.dp), contentAlignment = Alignment.Center) {
-            TextLink(CardCopy.SEE_PROCESS) { actions.openMika(r.run.conversationId) }
-        }
+        FooterLinks(actions, CardCopy.SEE_PROCESS to { actions.openMika(r.run.conversationId) })
     }
 }
 
@@ -629,11 +645,25 @@ private fun ChatCard(
         }
         if (r != null) Pinned(card.content, r.run.key, actions)
         input()
-        card.target?.let { id ->
-            Box(Modifier.fillMaxWidth().padding(top = 6.dp), contentAlignment = Alignment.Center) {
-                TextLink(CardCopy.BACK_TO_MIKA) { actions.openMika(id) }
-            }
+        FooterLinks(actions, card.target?.let { id -> CardCopy.BACK_TO_MIKA to { actions.openMika(id) } })
+    }
+}
+
+/**
+ * 卡片最底下一行:[primary](「查看过程」「回到 Mika」;空闲卡片还没有对话时没有)和灰色的「关闭悬浮胶囊」。
+ * 右上角的 × 只是收起;想让胶囊不再出现的人在这里关,不用去找设置。
+ */
+@Composable
+private fun FooterLinks(actions: CardActions, primary: Pair<String, () -> Unit>?) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 6.dp),
+        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+    ) {
+        primary?.let { (text, onClick) ->
+            TextLink(text, onClick = onClick)
+            Text("·", style = Sub, color = MikaTheme.colors.ink3)
         }
+        TextLink(CardCopy.HIDE_CAPSULE, MikaTheme.colors.ink3, actions::hideCapsule)
     }
 }
 
@@ -783,10 +813,10 @@ private fun Action(text: String, kind: ButtonKind, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TextLink(text: String, onClick: () -> Unit) {
+private fun TextLink(text: String, color: Color = MikaTheme.colors.accent, onClick: () -> Unit) {
     Text(
         text, Modifier.clip(MikaShapes.Pill).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 6.dp, vertical = 8.dp),
-        style = Sub.copy(fontSize = 13.sp), color = MikaTheme.colors.accent,
+        style = Sub.copy(fontSize = 13.sp), color = color,
     )
 }
 
@@ -801,7 +831,7 @@ private fun MiniScreen(frame: Bitmap, onZoom: () -> Unit) {
             .clickable(role = Role.Image, onClickLabel = CardCopy.SCREEN, onClick = onZoom)
             .semantics { contentDescription = CardCopy.SCREEN },
     ) {
-        Image(image, null, Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+        Image(image, null, Modifier.matchParentSize(), contentScale = ContentScale.Fit)
         Text(
             CardCopy.SCREEN_LABEL, Modifier.align(Alignment.BottomStart).padding(6.dp)
                 .background(Color.Black.copy(alpha = 0.55f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 1.dp),
@@ -820,7 +850,7 @@ private fun Zoomed(frame: Bitmap, actions: CardActions) {
             .clickable(role = Role.Image, onClickLabel = CardCopy.ZOOMED) { actions.zoom(false) }
             .semantics { contentDescription = CardCopy.ZOOMED },
     ) {
-        Image(image, null, Modifier.fillMaxWidth(), contentScale = ContentScale.FillWidth)
+        Image(image, null, Modifier.matchParentSize(), contentScale = ContentScale.Fit)
         Text(
             CardCopy.ZOOM_HINT, Modifier.align(Alignment.BottomCenter).padding(10.dp)
                 .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
