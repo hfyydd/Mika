@@ -273,6 +273,8 @@ class TaskRun(
     /** shell 进程没了,虚拟屏和上面的 App 一起没了;任务没法接着做。 */
     @Volatile var shellDied = false
         internal set
+    /** 接上手机后的一份;悬浮窗恢复声音要找它(接管交给用户的不在此处理)。 */
+    @Volatile private var phone: PhoneSide? = null
     /** 发布与收尾互斥;[ended] 之后不再写状态,迟到的发布不能盖掉终态或重新拿锁。 */
     private val publishLock = Any()
     private var ended = false
@@ -305,6 +307,18 @@ class TaskRun(
     fun finishedMyself(waitKey: Int?) { takeover?.let { t -> scope.launch { t.finishedMyself(waitKey) } } }
     fun skip(waitKey: Int?) { takeover?.let { t -> scope.launch { t.skip(waitKey) } } }
     fun putAside(waitKey: Int?) { takeover?.let { t -> scope.launch { t.putAside(waitKey) } } }
+
+    /** 用户在悬浮窗上恢复声音;接管中只作用于交给用户的那个 App;没有手机侧或目标 App 时不动。 */
+    fun unmute() {
+        val t = takeover
+        if (t != null) {
+            t.unmute()
+            return
+        }
+        val p = phone ?: return
+        val target = p.screen.target.value ?: return
+        scope.launch { p.audio.unmute(target.packageName, copyUser(target.userId)) }
+    }
 
     /** 回答提问;已经不在等(超时后才答、已答过)时调 [tooLate] 告诉用户这条回答没用上。 */
     fun answer(text: String, tooLate: () -> Unit) {
@@ -454,7 +468,7 @@ class TaskRun(
     suspend fun execute(priorTurns: List<Turn>): TaskState {
         // 手机一侧(内置助手、无障碍、虚拟屏)第一次 launch_app 时才接上:只用网页、沙箱的任务不需要它们
         var connection: com.wangzan101.mika.cap.phone.shell.ShellBinding? = null
-        var phone: PhoneSide? = null
+        phone = null
         // 虚拟屏、网页显示等:建好当场归它,收尾时一起放掉;不经「建完再记到变量」,取消落在中间也不会漏
         val resources = ResourceScope()
         var watcher: DeviceStateWatcher? = null

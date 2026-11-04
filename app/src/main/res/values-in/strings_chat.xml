@@ -148,6 +148,8 @@
     <string name="chat_edit_message">Ubah pesan</string>
     <string name="chat_withdraw_message">Tarik pesan</string>
     <string name="pip_close">Tutup tampilan kecil untuk tugas ini</string>
+    <string name="pip_mute">Bisukan aplikasi</string>
+    <string name="pip_unmute">Kembalikan suara</string>
     <string name="pip_reopen">Tampilkan layar</string>
     <string name="pip_closed_needs_you">Perlu Anda</string>
     <string name="pip_closed_hint">Ditutup untuk tugas ini. Ketuk “Tampilkan layar” di kanan bawah, atau buka “Layar latar belakang” di menu samping.</string>

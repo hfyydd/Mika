@@ -163,6 +163,8 @@
     <string name="chat_edit_message">Изменить сообщение</string>
     <string name="chat_withdraw_message">Отозвать сообщение</string>
     <string name="pip_close">Закрыть маленькое окно для этой задачи</string>
+    <string name="pip_mute">Выключить звук приложения</string>
+    <string name="pip_unmute">Вернуть звук</string>
     <string name="pip_reopen">Показать экран</string>
     <string name="pip_closed_needs_you">Нужны вы</string>
     <string name="pip_closed_hint">Закрыто для этой задачи. Нажмите «Показать экран» справа внизу или откройте «Фоновые экраны» в боковом меню.</string>

@@ -158,6 +158,8 @@
     <string name="chat_edit_message">Editar mensagem</string>
     <string name="chat_withdraw_message">Retirar mensagem</string>
     <string name="pip_close">Fechar a miniatura desta tarefa</string>
+    <string name="pip_mute">Silenciar o app</string>
+    <string name="pip_unmute">Voltar o som</string>
     <string name="pip_reopen">Mostrar tela</string>
     <string name="pip_closed_needs_you">Precisa de você</string>
     <string name="pip_closed_hint">Fechada para esta tarefa. Toque em “Mostrar tela” no canto inferior direito ou abra “Telas em segundo plano” no menu lateral.</string>

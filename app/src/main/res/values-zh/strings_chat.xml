@@ -148,6 +148,8 @@
     <string name="chat_edit_message">编辑消息</string>
     <string name="chat_withdraw_message">撤回消息</string>
     <string name="pip_close">这个任务不再显示小画面</string>
+    <string name="pip_mute">App 静音</string>
+    <string name="pip_unmute">恢复声音</string>
     <string name="pip_reopen">显示画面</string>
     <string name="pip_closed_needs_you">等你处理</string>
     <string name="pip_closed_hint">这个任务不再浮出小画面。点右下角「显示画面」，或在侧栏「后台屏」里看。</string>

@@ -31,10 +31,13 @@ class AppMuter(
     /** 启动前静上、还没见它开出来的键:启动被拒时据此还原。 */
     private val early = HashSet<String>()
 
+    /** 手动取消静音;后续自动静音不再改这个 App,让它保持有声到任务收尾。 */
+    private val unmuted = HashSet<String>()
+
     @Synchronized
     fun beforeOpen(packageName: String, user: Int?) {
         val key = AppAudioKey.of(packageName, user)
-        if (key in muted || !wanted(packageName) || onMainScreen(packageName, user)) return
+        if (key in muted || key in unmuted || !wanted(packageName) || onMainScreen(packageName, user)) return
         if (audio.mute(key)) {
             muted += key
             early += key
@@ -45,7 +48,7 @@ class AppMuter(
     fun opened(packageName: String, user: Int?) {
         val key = AppAudioKey.of(packageName, user)
         early -= key
-        if (key in muted || !wanted(packageName)) return
+        if (key in muted || key in unmuted || !wanted(packageName)) return
         // 用户在主屏上正用着它:不静,照实说它可能出声
         if (onMainScreen(packageName, user) || !audio.mute(key)) {
             failed(packageName)
@@ -66,6 +69,20 @@ class AppMuter(
     fun release(packageName: String, user: Int?): Boolean {
         val key = AppAudioKey.of(packageName, user)
         early -= key
+        unmuted -= key
+        return restoreMuted(key)
+    }
+
+    /** 用户手动恢复声音;以后不再自动静它,任务收尾时也不改它。返回 false 表示 shell 已经不在了。 */
+    fun unmute(packageName: String, user: Int?): Boolean {
+        val key = AppAudioKey.of(packageName, user)
+        early -= key
+        if (!restoreMuted(key)) return false
+        unmuted += key
+        return true
+    }
+
+    private fun restoreMuted(key: String): Boolean {
         if (!audio.restore(key)) return false
         muted -= key
         return true

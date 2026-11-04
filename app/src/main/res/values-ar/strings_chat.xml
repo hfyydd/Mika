@@ -175,6 +175,8 @@
     <string name="chat_edit_message">تعديل الرسالة</string>
     <string name="chat_withdraw_message">سحب الرسالة</string>
     <string name="pip_close">إغلاق العرض المصغّر لهذه المهمة</string>
+    <string name="pip_mute">كتم صوت التطبيق</string>
+    <string name="pip_unmute">إرجاع الصوت</string>
     <string name="pip_reopen">عرض الشاشة</string>
     <string name="pip_closed_needs_you">تتطلب تدخّلك</string>
     <string name="pip_closed_hint">أُغلقت لهذه المهمة. انقر على «عرض الشاشة» أسفل اليمين، أو افتح «الشاشات في الخلفية» من القائمة الجانبية.</string>

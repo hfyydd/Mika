@@ -153,6 +153,8 @@
     <string name="chat_edit_message">Edit message</string>
     <string name="chat_withdraw_message">Withdraw message</string>
     <string name="pip_close">Close the small view for this task</string>
+    <string name="pip_mute">Mute this app</string>
+    <string name="pip_unmute">Turn sound back on</string>
     <string name="pip_reopen">Show screen</string>
     <string name="pip_closed_needs_you">Needs you</string>
     <string name="pip_closed_hint">Closed for this task. Tap “Show screen” at the bottom right, or open “Background screens” in the side menu.</string>

@@ -85,6 +85,7 @@ interface TaskActions {
     fun answerIn(conversationId: String, text: String) = answer(text)
     fun approveIn(conversationId: String, key: Int) = approve(key)
     fun declineIn(conversationId: String, key: Int) = decline(key)
+    fun unmuteIn(conversationId: String) {}
 }
 
 enum class StepState { Ok, Run, Wait, Dim }
@@ -249,6 +250,7 @@ data class PipUi(
     val mode: PipMode = PipMode.Running,
     val expanded: Boolean = false,
     val closed: Boolean = false,
+    val muted: Boolean = false,
 )
 
 enum class ComposerMode {
@@ -975,6 +977,13 @@ class ChatViewModel(
     fun reopenPip() {
         pipClosed = false
         _ui.update { it.copy(pip = gated(it.pip)) }
+    }
+
+    /** 悬浮窗上的静音开关:交给服务找这个对话的任务;没有任务就不动。 */
+    fun togglePipMute() {
+        val id = _ui.value.conversationId ?: return
+        actions.unmuteIn(id)
+        _ui.update { it.copy(pip = it.pip.copy(muted = !it.pip.muted)) }
     }
 
     /** 切到某个对话;任务在跑时不切。 */

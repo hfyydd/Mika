@@ -158,6 +158,8 @@
     <string name="chat_edit_message">Editar mensaje</string>
     <string name="chat_withdraw_message">Retirar mensaje</string>
     <string name="pip_close">Cerrar la vista pequeña de esta tarea</string>
+    <string name="pip_mute">Silenciar la app</string>
+    <string name="pip_unmute">Volver al sonido</string>
     <string name="pip_reopen">Mostrar pantalla</string>
     <string name="pip_closed_needs_you">Te necesita</string>
     <string name="pip_closed_hint">Cerrada para esta tarea. Toca “Mostrar pantalla” abajo a la derecha, o abre “Pantallas en segundo plano” en el menú lateral.</string>

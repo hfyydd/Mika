@@ -143,6 +143,22 @@ class AppMuterTest {
         assertEquals("allow", audio.modes["video.app"])
     }
 
+    @Test fun manualUnmuteKeepsSoundAndSkipsAutomaticMutingUntilTaskEnd() {
+        audio.modes["video.app"] = "allow"
+        muter.opened("video.app", null)
+        assertTrue(muter.unmute("video.app", null))
+        assertEquals("allow", audio.modes["video.app"])
+        // 用户说要有声;它再冒到前台、模型要重新打开也不改
+        muter.opened("video.app", null)
+        muter.beforeOpen("video.app", null)
+        assertEquals(listOf("video.app"), audio.mutes)
+    }
+
+    @Test fun mutedAppUnmutesEvenIfNotTracked() {
+        audio.modes["video.app"] = "ignore"
+        muter.unmute("video.app", 10)
+    }
+
     @Test fun audioKeyRoundTrips() {
         assertEquals("a.app", AppAudioKey.of("a.app", null))
         assertEquals("a.app@999", AppAudioKey.of("a.app", 999))

@@ -148,6 +148,8 @@
     <string name="chat_edit_message">メッセージを編集</string>
     <string name="chat_withdraw_message">メッセージを取り消す</string>
     <string name="pip_close">このタスクの小さな表示を閉じる</string>
+    <string name="pip_mute">アプリをミュート</string>
+    <string name="pip_unmute">音を戻す</string>
     <string name="pip_reopen">画面を表示</string>
     <string name="pip_closed_needs_you">あなたの対応が必要</string>
     <string name="pip_closed_hint">このタスクでは閉じました。右下の「画面を表示」をタップするか、サイドメニューの「バックグラウンドの画面」を開いてください。</string>

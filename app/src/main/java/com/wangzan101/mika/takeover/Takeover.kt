@@ -203,6 +203,13 @@ class Takeover(
     /** 「我自己做完了」:Agent 不再操作,只核实结果并结束。 */
     suspend fun finishedMyself(key: Int? = null): Boolean = giveBack(HandBack(HandBackOutcome.complete, userFinished = true), key)
 
+    /** 接管中用户在悬浮窗上恢复声音;这时交给用户的 App 已有声,这个开关只为界面对齐。 */
+    fun unmute() {
+        synchronized(this) {
+            if (_stage.value == Stage.HandedOver && !handedWeb) handedPackage?.let { port.setSound(it, true) }
+        }
+    }
+
     /** 「跳过」:不处理,告诉 Agent 没有发生交回;App 若在主屏先挪回,挪不回就保持原状。 */
     suspend fun skip(key: Int? = null): Boolean = giveBack(HandBack(HandBackOutcome.skipped), key)
 
