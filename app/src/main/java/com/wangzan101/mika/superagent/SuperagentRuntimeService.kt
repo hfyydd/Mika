@@ -24,9 +24,6 @@ import com.wangzan101.mika.core.superagent.Runner
 import com.wangzan101.mika.core.superagent.SourceOutbox
 import com.wangzan101.mika.core.superagent.SuperagentRuntime
 import com.wangzan101.mika.core.superagent.SuperagentSettings
-import com.wangzan101.mika.core.superagent.TelegramReplyChannel
-import com.wangzan101.mika.core.superagent.TelegramReplyConfig
-import com.wangzan101.mika.core.superagent.TelegramSource
 import com.wangzan101.mika.settings.ProviderStore
 import com.wangzan101.mika.superagent.bridge.SuperagentBridge
 import com.wangzan101.mika.superagent.bridge.SuperagentLocalReplyChannel
@@ -42,8 +39,7 @@ import kotlinx.coroutines.launch
 import java.io.File
 
 /**
- * 分身层的宿主服务:只装配 core 的 Runtime 与 Mika 的执行端口;不接管 TaskService,也不改既有任务链。
- * 本地聊天不需要 Telegram 配置；Telegram 只在用户配置后作为可选来源叠加。
+ * Super 层的宿主服务:只装配 core 的 Runtime 与本地聊天桥;不接管 TaskService,也不改既有任务链。
  */
 class SuperagentRuntimeService : Service() {
     private val bridge by lazy { SuperagentBridge.get(this) }
@@ -105,16 +101,10 @@ class SuperagentRuntimeService : Service() {
             executor = null,
         )
         val effects = EffectQueue(FileEffectStore(root.resolve("effects.json").toPath()))
-        val channels = buildMap {
-            settings.telegram?.takeIf { settings.telegramReady }?.let { telegram ->
-                put("telegram:${telegram.instance}", TelegramReplyChannel(
-                    TelegramReplyConfig(telegram.instance, telegram.token, telegram.baseUrl),
-                ))
-            }
-        }
-        val localOutbox = SourceOutbox(effects, channels +
-            ("chat:${LOCAL_SOURCE}" to SuperagentLocalReplyChannel(this)))
-        val telegram = settings.telegram.takeIf { settings.telegramReady }
+        val localOutbox = SourceOutbox(
+            effects,
+            mapOf("chat:${SuperagentLocalSource.SOURCE_INSTANCE}" to SuperagentLocalReplyChannel(this)),
+        )
         val runner = Runner(
             engine,
             TicketHostTaskExecutor(this) { engine.snapshot() },
@@ -124,8 +114,8 @@ class SuperagentRuntimeService : Service() {
         runtime = SuperagentRuntime(
             engine = engine,
             runner = runner,
-            policy = { mergePolicy(policyStore.load(), settings, localSource) },
-            sources = listOfNotNull(localSource, telegram?.let { TelegramSource(it) }),
+            policy = { mergePolicy(policyStore.load()) },
+            sources = listOf(localSource),
             effects = effects,
             outbox = localOutbox,
         ).also { runtime ->
@@ -141,17 +131,8 @@ class SuperagentRuntimeService : Service() {
 
     private fun mergePolicy(
         policy: com.wangzan101.mika.core.superagent.Policy,
-        settings: SuperagentSettings,
-        localSource: SuperagentLocalSource,
     ): com.wangzan101.mika.core.superagent.Policy {
         var merged = policy
-        settings.telegram?.takeIf { it.allowFrom.isNotEmpty() }?.let { telegram ->
-            val current = merged.allowedActors[telegram.instance].orEmpty()
-            if (telegram.allowFrom.any { it !in current }) {
-                merged = merged.copy(allowedActors = merged.allowedActors +
-                    (telegram.instance to (current + telegram.allowFrom)))
-            }
-        }
         val localActors = merged.allowedActors[LOCAL_SOURCE].orEmpty()
         if ("owner" !in localActors) {
             merged = merged.copy(allowedActors = merged.allowedActors +

@@ -161,17 +161,8 @@
     <string name="mcp_servers_status_fail">连接失败:%1$s</string>
     <string name="mcp_servers_refresh_all">测试全部</string>
     <string name="mcp_servers_allowlist">允许的工具(英文逗号分隔,留空为全部)</string>
-    <string name="superagent_title">分身</string>
-    <string name="superagent_runtime">运行时</string>
-    <string name="superagent_enabled">启用分身</string>
-    <string name="superagent_enabled_sub">在本地长期完成任务,不使用外部云电脑</string>
-    <string name="superagent_telegram">Telegram 来源</string>
-    <string name="superagent_telegram_sub">可选的输入通道</string>
-    <string name="superagent_telegram_edit">编辑 Telegram 来源</string>
-    <string name="superagent_instance">实例名</string>
-    <string name="superagent_token">Bot Token</string>
-    <string name="superagent_allow_from">允许的人(英文逗号分隔)</string>
-    <string name="superagent_allow_all">接受群里全部消息</string>
-    <string name="superagent_allow_all_sub">关闭时只有 @ 和私聊能开工</string>
+    <string name="superagent_title">Super</string>
+    <string name="superagent_enabled">启用 Super</string>
+    <string name="superagent_enabled_sub">在这台手机上长期完成任务</string>
     <string name="superagent_note">工作都在这台手机上完成。远端审批保持严格,付款一律禁用。</string>
 </resources>

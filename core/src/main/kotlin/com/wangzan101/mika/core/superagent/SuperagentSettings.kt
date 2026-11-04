@@ -7,19 +7,15 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
 
-/** 用户显式打开的分身配置;token 是凭据,只留在 App 私有目录。 */
+/** 用户显式打开的 Super 配置。 */
 @Serializable
 data class SuperagentSettings(
     val enabled: Boolean = false,
     val pollIntervalMs: Long = SuperagentRuntime.DEFAULT_INTERVAL_MS,
-    val telegram: TelegramConfig? = null,
 ) {
     init {
         require(pollIntervalMs > 0) { "pollIntervalMs must be positive" }
     }
-
-    val telegramReady: Boolean
-        get() = telegram != null && telegram.token.isNotBlank() && telegram.instance.isNotBlank()
 }
 
 interface SuperagentSettingsStore {
