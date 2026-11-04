@@ -153,4 +153,5 @@
     <string name="pip_closed_hint">這個任務不再浮出小畫面。點右下角「顯示畫面」，或在側欄「背景螢幕」裡看。</string>
     <string name="chat_conversation_tokens">本對話共 %1$s</string>
     <string name="chat_conversation_tokens_partial">本對話至少 %1$s</string>
+    <string name="superagent_shortcut">Super</string>
 </resources>

@@ -282,6 +282,7 @@ class ConversationStore(private val dir: File) {
             fun field(k: String) = (o[k] as? JsonPrimitive)?.contentOrNull
             val turn = Turn(
                 field("userText") ?: return@mapNotNull null, field("outcome").orEmpty(), field("status") ?: return@mapNotNull null, field("note"), field("runId"),
+                source = field("source").orEmpty(),
                 memoryNotes = objects(o, "memoryNotes").mapNotNull { n ->
                     val kind = NoteKind.entries.find { it.name == str(n, "kind") } ?: return@mapNotNull null
                     MemoryNote(kind, str(n, "memoryId") ?: return@mapNotNull null, str(n, "undoToken"), str(n, "pendingId"))
@@ -348,6 +349,7 @@ class ConversationStore(private val dir: File) {
             buildJsonObject {
                 put("userText", it.userText); put("outcome", it.outcome); put("status", it.status)
                 it.note?.let { n -> put("note", n) }; it.runId?.let { r -> put("runId", r) }; it.result?.let { r -> put("result", r) }
+                if (it.source.isNotEmpty()) put("source", it.source)
                 // 只存种类和编号:记忆内容只在加密的记忆文件里,界面现取
                 if (it.memoryNotes.isNotEmpty()) put("memoryNotes", JsonArray(it.memoryNotes.map { n ->
                     buildJsonObject {

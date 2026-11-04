@@ -14,6 +14,7 @@ class SuperagentRuntime(
     private val sources: List<Source> = emptyList(),
     private val effects: EffectQueue? = null,
     private val outbox: SourceOutbox? = null,
+    private val onEvalOutcomes: (List<EvalOutcome>) -> Unit = {},
 ) {
     private var loop: Job? = null
 
@@ -66,7 +67,8 @@ class SuperagentRuntime(
             while (isActive) {
                 try {
                     pollOnce()
-                    evaluateOnce()
+                    val outcomes = evaluateOnce()
+                    if (outcomes.isNotEmpty()) onEvalOutcomes(outcomes)
                     watchdogOnce()
                     outbox?.flush()
                 } catch (e: kotlinx.coroutines.CancellationException) {

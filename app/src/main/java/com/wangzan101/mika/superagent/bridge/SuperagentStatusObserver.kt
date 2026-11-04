@@ -22,10 +22,8 @@ class SuperagentStatusObserver(
                 ReportState.Failed, ReportState.Dropped -> "failed"
                 null -> "working"
             }
+            // 结束卡片要留给用户看到结果；下一条 Super 消息会覆盖同一对话的状态。
             bridge.report(ticket.threadKey, ticket.id, ticket.title, line)
-            if (ticket.ended != null && ticket.threadKey.startsWith("chat:")) {
-                SuperagentBridge.get(context).clear(ticket.threadKey.removePrefix("chat:"))
-            }
         }
     }
 }

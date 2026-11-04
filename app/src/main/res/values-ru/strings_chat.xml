@@ -168,4 +168,5 @@
     <string name="pip_closed_hint">Закрыто для этой задачи. Нажмите «Показать экран» справа внизу или откройте «Фоновые экраны» в боковом меню.</string>
     <string name="chat_conversation_tokens">Этот чат: %1$s</string>
     <string name="chat_conversation_tokens_partial">Этот чат: не меньше %1$s</string>
+    <string name="superagent_shortcut">Super</string>
 </resources>

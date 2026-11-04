@@ -20,8 +20,9 @@ class SuperagentLocalSource : Source {
 
     /** conversationId 作为 threadKey；同一段聊天直通已有 Ticket。 */
     fun send(conversationId: String, externalId: String, actor: String, text: String): Trigger {
+        val triggerId = triggerId(conversationId, externalId)
         val trigger = Trigger(
-            id = "chat:$conversationId:$externalId",
+            id = triggerId,
             source = SourceRef(kind, SOURCE_INSTANCE),
             externalId = externalId,
             threadKey = "chat:$conversationId",
@@ -57,6 +58,9 @@ class SuperagentLocalSource : Source {
 
     companion object {
         const val SOURCE_INSTANCE = "local"
+
+        /** Bridge 和 Source 必须用同一个编号约定，Runtime 才能把 Router 判决送回原对话。 */
+        fun triggerId(conversationId: String, externalId: String) = "chat:$conversationId:$externalId"
     }
 }
 

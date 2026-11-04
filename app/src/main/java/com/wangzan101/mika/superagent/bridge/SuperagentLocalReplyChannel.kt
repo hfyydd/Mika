@@ -20,15 +20,16 @@ class SuperagentLocalReplyChannel(private val context: Context) : ReplyChannel {
         ConversationStore.shared(context).append(
             conversationId,
             Turn(
-                userText = "",
+                userText = envelope.triggerText,
                 outcome = text,
                 status = when {
                     envelope.deliverHere -> "unverified"
                     else -> "succeeded"
                 },
+                runId = "super-${envelope.ticketId}",
+                source = "super",
             ),
         )
-        SuperagentBridge.get(context).clear(conversationId)
         "local:${conversationId}:${envelope.ticketId}"
     }
 }

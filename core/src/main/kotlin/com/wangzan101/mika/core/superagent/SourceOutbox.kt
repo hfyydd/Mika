@@ -11,6 +11,8 @@ data class ReplyEnvelope(
     val threadKey: String,
     val ticketId: String,
     val text: String,
+    /** 原请求原文；本地聊天用它把回复并回同一张问答卡。 */
+    val triggerText: String = "",
     /** true 表示这不是提问原线程，而是被授权的主动推送。 */
     val deliverHere: Boolean = false,
 )
@@ -30,7 +32,14 @@ class SourceOutbox(
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) {
     fun enqueue(ticket: Ticket, trigger: Trigger, result: String, deliverHere: Boolean = false) {
-        val envelope = ReplyEnvelope(trigger.source, trigger.threadKey, ticket.id, result, deliverHere)
+        val envelope = ReplyEnvelope(
+            trigger.source,
+            trigger.threadKey,
+            ticket.id,
+            result,
+            deliverHere = deliverHere,
+            triggerText = trigger.text,
+        )
         val payload = json.encodeToString(envelope)
         effects.submit("reply:${ticket.id}:${payload.hashCode()}", EffectKind.Reply, ticket.id, payload = payload)
     }

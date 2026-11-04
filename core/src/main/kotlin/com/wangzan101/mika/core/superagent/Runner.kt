@@ -57,10 +57,15 @@ class Runner(
         val outbox = outbox ?: return
         val state = engine.snapshot()
         val current = state.assignments.firstOrNull { it.id == assignmentId } ?: return
+        // 本地 Super 卡片自己显示 Waiting/Blocked；追问经直通送回原票，不能先把它持久化成最终回答。
+        val localChat = ticket.threadKey.startsWith("chat:")
         val shouldReply = when (current.state) {
             ReportState.Ready, ReportState.Blocked, ReportState.Waiting, ReportState.Failed, ReportState.Dropped -> true
             ReportState.Progress -> false
             null -> false
+        } && when (current.state) {
+            ReportState.Waiting, ReportState.Blocked -> !localChat
+            else -> true
         }
         if (!shouldReply) return
         val text = current.question.ifBlank { current.result.ifBlank { if (current.state == ReportState.Ready) "done" else return } }

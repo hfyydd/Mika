@@ -153,4 +153,5 @@
     <string name="pip_closed_hint">このタスクでは閉じました。右下の「画面を表示」をタップするか、サイドメニューの「バックグラウンドの画面」を開いてください。</string>
     <string name="chat_conversation_tokens">この会話: %1$s</string>
     <string name="chat_conversation_tokens_partial">この会話: %1$s 以上</string>
+    <string name="superagent_shortcut">Super</string>
 </resources>

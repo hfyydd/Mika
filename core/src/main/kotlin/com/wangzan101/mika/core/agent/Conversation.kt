@@ -16,6 +16,8 @@ import com.wangzan101.mika.core.model.Role
  */
 data class Turn(
     val userText: String, val outcome: String, val status: String, val note: String? = null, val runId: String? = null,
+    /** 走过 Super 层的轮次记成 "super";旧记录和普通 Mika 轮次为空。 */
+    val source: String = "",
     val memoryNotes: List<com.wangzan101.mika.core.memory.MemoryNote> = emptyList(),
     val usedMemory: List<String> = emptyList(),
     val skillNotes: List<com.wangzan101.mika.core.skills.SkillNote> = emptyList(),

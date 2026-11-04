@@ -30,6 +30,7 @@ import com.wangzan101.mika.task.SteerState
 import com.wangzan101.mika.ui.PipPhysics.Corner
 import com.wangzan101.mika.core.cap.web.AttachedPage
 import com.wangzan101.mika.core.userscreen.UserScreenMessage
+import com.wangzan101.mika.superagent.bridge.SuperWorkStatus
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.TestScope
@@ -97,6 +98,36 @@ class ChatViewModelTest {
     private fun TestScope.emit(s: TaskState) {
         state.value = s
         runCurrent()
+    }
+
+    /** Super 请求先在本地落一张工作卡；Router 明确拒绝时也要把原因和输入框还回来。 */
+    @Test fun superSendShowsLocalCardThenReportsFailure() = runTest {
+        val superMode = MutableStateFlow(true)
+        val superStatus = MutableStateFlow<Map<String, SuperWorkStatus>>(emptyMap())
+        val sent = mutableListOf<Pair<String, String>>()
+        val vm = ChatViewModel(
+            backgroundScope, state, stage, actions, ConversationStore(tmp.newFolder()),
+            superMode = superMode,
+            superStatus = superStatus,
+            beginSuper = { goal, conversationId -> sent += conversationId to goal; true },
+        ).also { runCurrent() }
+
+        assertTrue(vm.send("super_smoke", ok))
+        runCurrent()
+        assertEquals(listOf("super_smoke"), sent.map { it.second })
+        assertEquals(1, vm.ui.value.exchanges.size)
+        assertEquals("super_smoke", vm.ui.value.exchanges.first().goal)
+        assertTrue(vm.ui.value.exchanges.first().status is ExchangeStatus.Working)
+        assertEquals(ComposerMode.Busy, vm.ui.value.composer)
+        assertTrue(calls.isEmpty())
+
+        val id = vm.ui.value.conversationId!!
+        superStatus.value = mapOf(id to SuperWorkStatus("t1", "super_smoke", "failed", "router output unparseable"))
+        runCurrent()
+        val card = vm.ui.value.exchanges.single()
+        assertTrue(card.status is ExchangeStatus.Failed)
+        assertEquals("router output unparseable", (card.status as ExchangeStatus.Failed).reason)
+        assertEquals(ComposerMode.Idle, vm.ui.value.composer)
     }
 
     /** 运行事件里又多了一件实际做过的事。 */

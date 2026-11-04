@@ -161,4 +161,8 @@
     <string name="mcp_servers_status_fail">連線失敗:%1$s</string>
     <string name="mcp_servers_refresh_all">測試全部</string>
     <string name="mcp_servers_allowlist">允許的工具(英文逗號分隔,留空為全部)</string>
+    <string name="superagent_title">Super</string>
+    <string name="superagent_enabled">啟用 Super</string>
+    <string name="superagent_enabled_sub">在這台手機上長期完成任務</string>
+    <string name="superagent_note">工作都在這台手機上完成。遠端審批保持嚴格，付款一律禁用。</string>
 </resources>

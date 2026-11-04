@@ -522,7 +522,7 @@ private fun LazyListScope.exchange(
     /** 这一轮用了多少 token(结束后、读到运行小结时才有)。 */
     tokens: Long? = null,
 ) {
-    if (ex.goal.isNotEmpty()) item("u$index") { UserBubble(ex.goal, conversationId, key = "u$index") }
+    if (ex.goal.isNotEmpty()) item("u$index") { UserBubble(ex.goal, conversationId, key = "u$index", superMarked = ex.superMarked) }
     val active = ex.status.isActive()
     val answering = ex.status == ExchangeStatus.Working && !ex.draft.isNullOrBlank()
     if (active) {
@@ -578,7 +578,7 @@ private fun ExchangeStatus.isActive() =
  * 在浏览器页上对着一页问的,最上面是「网页 · 网站」和选中的字(见 [SentPage]),页面说明那几行不显示。
  */
 @Composable
-internal fun UserBubble(text: String, conversationId: String?, note: String? = null, key: String = "") {
+internal fun UserBubble(text: String, conversationId: String?, note: String? = null, key: String = "", superMarked: Boolean = false) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val paged = remember(text) { AttachedPage.parse(text) }
@@ -607,9 +607,36 @@ internal fun UserBubble(text: String, conversationId: String?, note: String? = n
                     ) { UserBubbleText(words) }
                 }
             }
-            note?.let { Text(it, Modifier.padding(top = 3.dp, end = 4.dp), style = MikaType.Hint, color = MikaTheme.colors.ink3) }
+            // Super 徽标说明这一轮走了本地决策层；和插话去向的小字同行时放在一起，不挤占正文。
+            if (superMarked || note?.isNotBlank() == true) {
+                Row(
+                    Modifier.padding(top = 3.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (superMarked) SuperMark()
+                    note?.takeIf(String::isNotBlank)?.let {
+                        Text(it, style = MikaType.Hint, color = MikaTheme.colors.ink3)
+                    }
+                }
+            }
         }
     }
+}
+
+/** 本地 Super 调度层的小标；不打断消息本身，只说明这一轮走了另一条链路。 */
+@Composable
+private fun SuperMark() {
+    Text(
+        "Super",
+        Modifier
+            .clip(MikaShapes.Pill)
+            .background(MikaTheme.colors.accentSoft)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        style = MikaType.Hint,
+        fontWeight = FontWeight.SemiBold,
+        color = MikaTheme.colors.accent,
+    )
 }
 
 @Composable

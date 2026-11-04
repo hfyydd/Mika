@@ -118,6 +118,7 @@ class SuperagentRuntimeService : Service() {
             sources = listOf(localSource),
             effects = effects,
             outbox = localOutbox,
+            onEvalOutcomes = ::reportOutcomes,
         ).also { runtime ->
             runtime.start(scope, settings.pollIntervalMs)
             scope.launch {
@@ -128,6 +129,29 @@ class SuperagentRuntimeService : Service() {
             }
         }
     }
+
+    /** Bridge 只做界面映射；Router 为什么拒绝、票建到哪一步，都要在这条边界上翻译给用户。 */
+    private fun reportOutcomes(outcomes: List<com.wangzan101.mika.core.superagent.EvalOutcome>) {
+        outcomes.forEach { outcome ->
+            when (outcome) {
+                is com.wangzan101.mika.core.superagent.EvalOutcome.TicketCreated ->
+                    bridge.accepted(localConversation(outcome.ticket.threadKey), outcome.ticket.id, outcome.ticket.title)
+                is com.wangzan101.mika.core.superagent.EvalOutcome.Attached ->
+                    bridge.accepted(localConversation(outcome.ticket.threadKey), outcome.ticket.id, outcome.ticket.title)
+                is com.wangzan101.mika.core.superagent.EvalOutcome.TicketStopped ->
+                    bridge.report(localConversation(outcome.ticket.threadKey), outcome.ticket.id, outcome.ticket.title, "failed")
+                is com.wangzan101.mika.core.superagent.EvalOutcome.Ignored ->
+                    bridge.rejected(outcome.decision.triggerId, outcome.decision.reason.ifBlank { "ignored by router" })
+                is com.wangzan101.mika.core.superagent.EvalOutcome.WouldAccept ->
+                    bridge.rejected(outcome.triggerId, outcome.reason.ifBlank { "router is observing only" })
+                is com.wangzan101.mika.core.superagent.EvalOutcome.NotAdmitted ->
+                    bridge.rejected(outcome.triggerId, outcome.reason)
+                is com.wangzan101.mika.core.superagent.EvalOutcome.TicketResumed -> Unit
+            }
+        }
+    }
+
+    private fun localConversation(threadKey: String) = threadKey.removePrefix("chat:")
 
     private fun mergePolicy(
         policy: com.wangzan101.mika.core.superagent.Policy,

@@ -169,4 +169,8 @@
     <string name="mcp_servers_status_fail">Falha na conexão: %1$s</string>
     <string name="mcp_servers_refresh_all">Testar tudo</string>
     <string name="mcp_servers_allowlist">Ferramentas permitidas (separadas por vírgulas, vazio = todas)</string>
+    <string name="superagent_title">Super</string>
+    <string name="superagent_enabled">Ativar Super</string>
+    <string name="superagent_enabled_sub">Executa tarefas longas neste telefone</string>
+    <string name="superagent_note">O trabalho fica neste telefone. As aprovações remotas continuam rígidas e os pagamentos estão sempre desativados.</string>
 </resources>

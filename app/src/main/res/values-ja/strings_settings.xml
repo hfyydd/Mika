@@ -161,4 +161,8 @@
     <string name="mcp_servers_status_fail">接続に失敗:%1$s</string>
     <string name="mcp_servers_refresh_all">すべてテスト</string>
     <string name="mcp_servers_allowlist">許可するツール(カンマ区切り、空欄はすべて)</string>
+    <string name="superagent_title">Super</string>
+    <string name="superagent_enabled">Superを有効にする</string>
+    <string name="superagent_enabled_sub">このスマートフォン上で長時間タスクを実行します</string>
+    <string name="superagent_note">作業はこのスマートフォン内で完結します。リモート承認は厳格に保ち、決済は常に無効です。</string>
 </resources>

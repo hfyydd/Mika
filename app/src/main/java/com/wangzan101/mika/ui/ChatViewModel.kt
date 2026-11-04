@@ -184,6 +184,8 @@ data class Exchange(
     val keptPageClosed: String? = null,
     /** 每一步实际做的动作(按步号):标题是汇总,点开一步时看这里的明细。 */
     val stepActions: Map<Int, List<StepAction>> = emptyMap(),
+    /** 这轮任务由本地 Super 层调度；界面上用它标出与普通 Mika 任务的差别。 */
+    val superMarked: Boolean = false,
 )
 
 /** 在跑时的一行进展:等你时说等什么;模型请求在途时只给中性状态;否则是这一步的话,没有就是最近做的事。 */
@@ -492,7 +494,7 @@ class ChatViewModel(
                     _ui.update {
                         liveIndex = it.exchanges.size
                         it.copy(
-                            exchanges = it.exchanges + Exchange(status.goal, emptyList(), ExchangeStatus.Working, live = true),
+                            exchanges = it.exchanges + Exchange(status.goal, emptyList(), ExchangeStatus.Working, live = true, superMarked = true),
                             composer = ComposerMode.Busy,
                         )
                     }
@@ -502,11 +504,21 @@ class ChatViewModel(
                     val next = when (status.line) {
                         "waiting" -> Exchange(status.goal, emptyList(), ExchangeStatus.NeedsInput(status.line, null), live = true)
                         "done" -> Exchange(status.goal, emptyList(), ExchangeStatus.Done(status.line, null), live = false)
-                        "failed" -> Exchange(status.goal, emptyList(), ExchangeStatus.Failed(status.line), live = false)
-                        else -> Exchange(status.goal, emptyList(), ExchangeStatus.Working, live = true, line = status.line)
+                        "failed" -> Exchange(status.goal, emptyList(), ExchangeStatus.Failed(status.reason.ifBlank { status.line }), live = false, superMarked = true)
+                        else -> Exchange(status.goal, emptyList(), ExchangeStatus.Working, live = true, line = status.line, superMarked = true)
                     }
-                    ui.copy(exchanges = ui.exchanges.toMutableList().also { it[liveIndex] = next }, composer = ComposerMode.Busy)
+                    ui.copy(
+                        exchanges = ui.exchanges.toMutableList().also { it[liveIndex] = next },
+                        composer = when (next.status) {
+                            is ExchangeStatus.NeedsInput -> ComposerMode.Answer
+                            is ExchangeStatus.Working -> ComposerMode.Busy
+                            else -> ComposerMode.Idle
+                        },
+                    )
                 }
+                if (map[id]?.line == "done" || map[id]?.line == "failed") liveIndex = -1
+                // 本地回复可能先落库；完成时再并一次，避免回答和原话分成两张卡。
+                if (map[id]?.line == "done") syncSaved(id)
             }
         }
     }
@@ -705,6 +717,11 @@ class ChatViewModel(
         val goal = QuoteMessage.compose(ui.quote, words)
         when (ui.composer) {
             ComposerMode.Answer -> {
+                // Super 的追问不是 Mika TaskRun 的 answer:它必须直通原 Ticket，让 Router/Worker 继续掌管。
+                if (superMode.value && ui.conversationId != null && beginSuper(goal, ui.conversationId!!)) {
+                    joinSuperAnswer(goal)
+                    return true
+                }
                 act({ actions.answer(goal) }) { actions.answerIn(it, goal) }
                 return true
             }
@@ -716,14 +733,47 @@ class ChatViewModel(
             return false
         }
         val id = ui.conversationId ?: store.newConversation()
-        if (superMode.value && beginSuper(goal, id)) {
+        if (superMode.value) {
+            // Super 的进度晚一两个轮询周期才回来；先本地落卡，不让消息看起来发出去就消失。
             _ui.update {
-                it.copy(conversationId = id, composer = ComposerMode.Busy)
+                liveIndex = it.exchanges.size
+                it.copy(
+                    conversationId = id,
+                    exchanges = it.exchanges + Exchange(goal, emptyList(), ExchangeStatus.Working, live = true, startedAt = clock(), superMarked = true),
+                    composer = ComposerMode.Busy,
+                )
             }
-            return true
+            if (beginSuper(goal, id)) return true
+            rollbackSuperCard(goal)
         }
         begin(goal, id)
         return true
+    }
+
+    /** Super 卡片在等人时，回答先挂到这张卡下面；runtime 直通后由进度流改状态。 */
+    private fun joinSuperAnswer(goal: String) {
+        val index = liveIndex
+        if (index !in _ui.value.exchanges.indices) return
+        val note = SteerNote(java.util.UUID.randomUUID().toString(), goal, SteerState.Pending)
+        _ui.update { ui ->
+            val exchanges = ui.exchanges.toMutableList()
+            exchanges[index] = exchanges[index].copy(steers = exchanges[index].steers + note)
+            ui.copy(exchanges = exchanges, composer = ComposerMode.Busy)
+        }
+    }
+
+    /** 服务在两次读取开关之间被停掉时撤回乐观卡片；交桥是同步的，这里不会丢状态流。 */
+    private fun rollbackSuperCard(goal: String) {
+        val index = liveIndex
+        liveIndex = -1
+        _ui.update { ui ->
+            val exchanges = ui.exchanges.toMutableList()
+            val removed = index in exchanges.indices &&
+                exchanges[index].goal == goal &&
+                exchanges[index].status is ExchangeStatus.Working
+            if (removed) exchanges.removeAt(index)
+            ui.copy(exchanges = exchanges, composer = if (removed) ComposerMode.Idle else ui.composer)
+        }
     }
 
     /**
@@ -1389,7 +1439,7 @@ class ChatViewModel(
                 "cancelled" -> ExchangeStatus.Cancelled(Conversation.stopSummary(t))
                 else -> ExchangeStatus.Failed(t.outcome)
             }
-            return Exchange(t.userText, emptyList(), status, live = false, runId = t.runId,
+            return Exchange(t.userText, emptyList(), status, live = false, runId = t.runId, superMarked = t.source == "super",
                 memoryNotes = t.memoryNotes, usedMemory = t.usedMemory, skillNotes = t.skillNotes,
                 keptPage = t.keptPage, keptPageClosed = t.keptPageClosed,
                 steers = t.steers.mapIndexed { i, text ->

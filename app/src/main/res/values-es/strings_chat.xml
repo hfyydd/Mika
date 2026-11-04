@@ -163,4 +163,5 @@
     <string name="pip_closed_hint">Cerrada para esta tarea. Toca “Mostrar pantalla” abajo a la derecha, o abre “Pantallas en segundo plano” en el menú lateral.</string>
     <string name="chat_conversation_tokens">Esta conversación: %1$s</string>
     <string name="chat_conversation_tokens_partial">Esta conversación: al menos %1$s</string>
+    <string name="superagent_shortcut">Super</string>
 </resources>
