@@ -36,10 +36,10 @@ Router 不改写请求:Ticket 只登记原始 Trigger 引用(`instruction = trig
 
 ## 状态
 
-全部状态(JSON 快照,原子替换写入,同 `FileRunStateStore` 模式):threads、triggers(封顶 500)、tickets、assignments、decisions(审计)、readPositions(游标)、observations(Observe 记录)。进程重启后接着用,不重放事件。
+全部状态(JSON 快照,原子替换写入,同 `FileRunStateStore` 模式):threads、triggers(封顶 500)、tickets、assignments、decisions(审计)、readPositions(游标)、seenExternalIds(不受窗口裁剪的来源幂等账本)、observations(Observe 记录)。进程重启后接着用,不重放事件。
 
 ## 尚未接入
 
-- 来源实例:`Source` 端口已定义,定时可桥接现有 `TriggerEngine`;通知、中继渠道(tools/relay)按实例接入。
-- 装配与界面:App 侧实现 `SuperExecutor`(映射 `RunSpec`)、Policy 设置页、按「卡在谁那里」排序的 Ticket 面板。
-- 多渠道回复:复用 Outbox 后把 Channel 扩到中继渠道。
+- 当前 App 装配只接本机 `chat:local`;Telegram 只有 core 适配,通知、中继渠道(tools/relay)按实例接入。
+- 设置页、按「卡在谁那里」排序的完整 Ticket 面板,以及 Observe 一键转正的 UI 待接入。
+- 多渠道回复:本地聊天已接;把 Channel 扩到中继渠道前,渠道必须能用 effect id 幂等。

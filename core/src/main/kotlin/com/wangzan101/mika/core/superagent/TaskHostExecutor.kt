@@ -22,6 +22,8 @@ class TaskHostExecutor(
     private val host: TaskHost,
     /** 返回票里的原始 Trigger 文本;装配层用 Engine 快照查找,不把改写后的摘要传给执行器。 */
     private val rawRequest: suspend (Ticket) -> String? = { null },
+    /** 看门狗重派时给新 Assignment 独立 RunId,TaskCenter 才不会按旧 Run 去重。 */
+    private val runId: suspend (Ticket) -> String = { "superagent-${it.id}" },
 ) : SuperExecutor {
     override suspend fun run(ticket: Ticket, threadSummary: String): ExecutorReport {
         val request = rawRequest(ticket)?.take(TRIGGER_TEXT_LIMIT)
@@ -38,7 +40,7 @@ class TaskHostExecutor(
         val scope = mikaRunScope(ticket.mandate.scope)
         val result = host.run(
             RunSpec(
-                id = RunId("superagent-${ticket.id}"),
+                id = RunId(runId(ticket)),
                 goal = goal,
                 threadId = ticket.threadKey,
                 provenance = RunProvenance(RunOrigin.Trigger, Attendance.Unattended),

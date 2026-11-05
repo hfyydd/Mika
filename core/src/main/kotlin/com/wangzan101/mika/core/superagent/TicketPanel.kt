@@ -34,7 +34,7 @@ object TicketPanel {
 
     fun detail(state: SuperagentState, ticketId: String): TicketDetail? {
         val ticket = state.tickets.firstOrNull { it.id == ticketId } ?: return null
-        val assignment = state.assignments.filter { it.ticketId == ticketId }.maxByOrNull { it.reports.size }
+        val assignment = state.assignments.lastOrNull { it.ticketId == ticketId }
         val inputs = ticket.inputs.mapNotNull { input -> state.triggers.firstOrNull { it.id == input.triggerId } }
         return TicketDetail(ticket, assignment, inputs, stage(ticket, assignment))
     }

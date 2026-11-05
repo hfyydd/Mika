@@ -19,14 +19,22 @@ import java.io.File
 class TicketHostTaskExecutor(
     context: Context,
     private val snapshot: suspend () -> SuperagentState,
-) : SuperExecutor by TaskHostExecutor(
-    host = AndroidAgentHost(context),
-    rawRequest = { ticket ->
-        snapshot().triggers
-            .firstOrNull { it.id == ticket.triggerIds.firstOrNull() }?.text
-            ?: FileTriggerArchive(context).read(ticket)
-    },
-)
+) : SuperExecutor {
+    private val executor = TaskHostExecutor(
+        host = AndroidAgentHost(context),
+        rawRequest = { ticket ->
+            snapshot().triggers
+                .firstOrNull { it.id == ticket.triggerIds.firstOrNull() }?.text
+                ?: FileTriggerArchive(context).read(ticket)
+        },
+        runId = { ticket ->
+            val assignmentId = snapshot().assignments.lastOrNull { it.ticketId == ticket.id }?.id
+            if (assignmentId == null) "superagent-${ticket.id}" else "superagent-${ticket.id}:$assignmentId"
+        },
+    )
+
+    override suspend fun run(ticket: Ticket, threadSummary: String) = executor.run(ticket, threadSummary)
+}
 
 /** 按 Ticket 的 Trigger 追加原文;Engine 的窗口裁剪后,Executor 仍能拿到原始请求。 */
 class FileTriggerArchive(private val context: Context) {

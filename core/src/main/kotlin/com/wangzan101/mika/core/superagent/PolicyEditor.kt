@@ -14,11 +14,12 @@ object PolicyEditor {
     }
 
     fun removeActor(policy: Policy, instance: String, actor: String): Policy {
+        val clean = actor.trim()
         val current = policy.allowedActors[instance].orEmpty()
-        if (actor !in current) return policy
+        if (clean !in current) return policy
         return policy.copy(
             version = bump(policy.version),
-            allowedActors = policy.allowedActors + (instance to (current - actor)),
+            allowedActors = policy.allowedActors + (instance to (current - clean)),
         )
     }
 
@@ -34,6 +35,18 @@ object PolicyEditor {
             version = bump(policy.version),
             enabledRules = policy.enabledRules + (instance to (current + clean)),
         )
+    }
+
+    fun disableRule(policy: Policy, instance: String, rule: String): Policy {
+        val clean = rule.trim()
+        val current = policy.enabledRules[instance].orEmpty()
+        if (clean !in current) return policy
+        return policy.copy(version = bump(policy.version), enabledRules = policy.enabledRules - instance)
+    }
+
+    fun setSourceActive(policy: Policy, instance: String, active: Boolean): Policy {
+        if (policy.activeSources[instance] == active) return policy
+        return policy.copy(version = bump(policy.version), activeSources = policy.activeSources + (instance to active))
     }
 
     fun setCell(

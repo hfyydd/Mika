@@ -10,7 +10,7 @@
 - [x] 定位与架构文档、上游同步流程(已验证 v0.1.34 合并)
 - [x] autonomy 包(冻结待并入,见 2.5)
 - [x] Phase 1 领域规则与回放评测(M1 域层完成)
-- [x] core Runtime:崩溃恢复、持久副作用队列、看门狗派发、Telegram 收发适配、原路回信模型
+- [x] core Runtime:崩溃恢复、持久副作用队列、看门狗派发、执行 worker、原路回信模型(Telegram 只有 core 适配)
 - [x] Routine Ticket 桥:旧 Goal 状态映射到票状态,不再开第二条执行链
 - [x] Android 装配:Runtime 接进独立前台服务,不接管 MikaApp/TaskService;坚持不改上游核心文件的边界
 
@@ -35,17 +35,17 @@
 | # | 任务 | 做什么 | 验收 |
 |---|---|---|---|
 | 2.1 | SuperExecutor 适配器 | ✅ Ticket → RunSpec:scope 映射能力子集与 readOnly;经独立 TaskHost 派工;六态报告回流 Engine | 真机跑通一张票全生命周期 |
-| 2.2 | 效果队列 | ✅ Runner 改造成持久队列:每副作用一行,退避重试,保序,Later 语义,送达凭据 | 杀进程后待执行副作用不丢不重 |
-| 2.3 | 看门狗安卓化 | ✅ Assignment 超时→interrupted→重派;桥接 RunRecovery 的自查恢复;前台服务保活策略 | 模拟进程死亡,票跨死亡续跑 |
-| 2.4 | Router 装配 | ✅ 真模型接 LlmRouter;提示词按 dispatch 纪律(转引用不转述、附注≤30词、批量判);token 记账 | 每次判决计入用量;批内一次调用 |
-| 2.5 | autonomy 并入 | ✅ Goal 长期目标改造成例程票(routine ticket),删除 core/autonomy,迁移其测试 | 两套状态机归一;文档同步 |
+| 2.2 | 效果队列 | ✅ Runner 改造成持久队列;到期行不互锁;Started 执行恢复时换新,不盲目重放 | 杀进程后待执行副作用不丢不重 |
+| 2.3 | 看门狗安卓化 | ✅ Assignment 超时→interrupted→重派;specialUse 前台保活;App/开机启动恢复 | 模拟进程死亡,票跨死亡续跑 |
+| 2.4 | Router 装配 | ✅ 真模型接 LlmRouter;宿主校验和失败重排队;token 记账待对齐 | 每次判决计入用量;批内一次调用 |
+| 2.5 | autonomy 并入 | ◻️ RoutineTicket 桥已接;core/autonomy 与迁移测试仍待清理 | 两套状态机归一;文档同步 |
 
 ## Phase 3 渠道(来源接入)
 
 | # | 任务 | 做什么 | 验收 |
 |---|---|---|---|
 | 3.1 | relay 渠道框架 | ✅ relay 侧连接器接口:收消息→Trigger 帧推手机;回复帧发回;断线缓冲 | 手机离线,消息不丢 |
-| 3.2 | Telegram | ✅ 长轮询 bot:mention/private 判定、allow_from 名单、group_policy | @ 即答(快速路径)与开工单(任务)双路可用 |
+| 3.2 | Telegram | ◻️ core 长轮询 bot 与回复通道已实现;当前 App 装配是本机 chat,Telegram 未接线 | @ 即答(快速路径)与开工单(任务)双路可用 |
 | 3.3 | 飞书 | 长连接 bot(lark-oapi 同款机制);群/私聊判定 | 同上 |
 | 3.4 | 本机通知来源 | Android 通知监听→Trigger;按包名配置听谁 | 新来源接入不改 core |
 | 3.5 | 回复通道 | ✅ Outbox 扩展:回复按来源原路返回;deliver-here 标记的聊天收主动推送 | 结果与提问走同一会话 |
@@ -54,15 +54,15 @@
 
 | # | 任务 | 做什么 | 验收 |
 |---|---|---|---|
-| 4.1 | 策略设置 | ✅ 核心策略持久化 + PolicyEditor + 设置服务就绪;设置页/UI 界面待接入 | 改配置即改门禁;版本进 Mandate |
-| 4.2 | Ticket 面板 | ✅ 阶段表排序(person/* 沉顶);票详情(输入、报告、授权、账本);UI 界面待接入 | 面板只顶出需要人的票 |
-| 4.3 | 通知 | ✅ 通知模型 + Runtime 服务前台通知就绪;系统通知直达面板待 UI 接入 | 通知可关,不扰 |
+| 4.1 | 策略设置 | ◻️ 核心策略持久化、PolicyEditor、服务重验就绪;设置页/UI 界面待接入 | 改配置即改门禁;版本进 Mandate |
+| 4.2 | Ticket 面板 | ◻️ 阶段表和票详情模型已实现;当前只有本地聊天卡片,完整 UI 待接入 | 面板只顶出需要人的票 |
+| 4.3 | 通知 | ◻️ 通知模型和 Runtime 前台通知就绪;系统通知直达面板待 UI 接入 | 通知可关,不扰 |
 
 ## Phase 5 观察,然后放开
 
 | # | 任务 | 做什么 | 验收 |
 |---|---|---|---|
-| 5.1 | Observe 审计 | ✅ Observe 模式落账 + ObservationLog 模型;「一键转正规则」待 UI 接入 | 人工可审,可一键转正规则 |
+| 5.1 | Observe 审计 | ◻️ Observe 模式落账 + ObservationLog 模型;「一键转正规则」待 UI 接入 | 人工可审,可一键转正规则 |
 | 5.2 | 逐来源 Auto | 按来源逐个放开;准入格逐格放宽 | 每次放开有审计对照 |
 | 5.3 | 人格与记忆 | Worker 提示词接 Mika 记忆/知识;分身人格设定 | 简报/回复有稳定人设 |
 

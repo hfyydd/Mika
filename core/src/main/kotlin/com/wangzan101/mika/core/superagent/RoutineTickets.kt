@@ -43,7 +43,7 @@ object RoutineTickets {
     fun sync(goal: Goal, state: SuperagentState): Goal {
         val triggerId = "routine:${goal.id}"
         val ticket = state.tickets.lastOrNull { triggerId in it.triggerIds } ?: return goal
-        val assignment = state.assignments.filter { it.ticketId == ticket.id }.maxByOrNull { it.reports.size }
+        val assignment = state.assignments.lastOrNull { it.ticketId == ticket.id }
         val status = when {
             ticket.isOpen && waitsForPerson(assignment ?: Assignment("none", ticket.id)) -> GoalStatus.Waiting
             ticket.isOpen -> GoalStatus.Active

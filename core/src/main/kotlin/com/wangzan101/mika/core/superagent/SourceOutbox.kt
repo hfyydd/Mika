@@ -41,7 +41,7 @@ class SourceOutbox(
             triggerText = trigger.text,
         )
         val payload = json.encodeToString(envelope)
-        effects.submit("reply:${ticket.id}:${payload.hashCode()}", EffectKind.Reply, ticket.id, payload = payload)
+        effects.submit("reply:${ticket.id}:${trigger.id}:${payload.hashCode()}", EffectKind.Reply, ticket.id, payload = payload)
     }
 
     suspend fun flush(): Int {

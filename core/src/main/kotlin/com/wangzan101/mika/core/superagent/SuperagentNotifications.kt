@@ -12,7 +12,7 @@ object SuperagentNotifications {
     fun drafts(state: SuperagentState): List<Draft> = TicketPanel.rows(state)
         .filter { it.isOpen }
         .mapNotNull { ticket ->
-            val assignment = state.assignments.filter { it.ticketId == ticket.id }.maxByOrNull { it.reports.size }
+            val assignment = state.assignments.lastOrNull { it.ticketId == ticket.id }
             if (assignment == null || !waitsForPerson(assignment)) return@mapNotNull null
             Draft(ticket.id, ticket.title, assignment.question, ticket.threadKey)
         }

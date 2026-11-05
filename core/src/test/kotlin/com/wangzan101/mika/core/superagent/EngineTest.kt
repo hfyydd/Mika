@@ -306,6 +306,39 @@ class EngineTest {
     }
 
     @Test
+    fun `incomplete router output retries instead of dropping the batch`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, Router { batch, _, _, _ ->
+            batch.map { Decision.Ignore(it.id, "router output missing entry") }
+        })
+        e.receive(trigger("retry"))
+        e.evaluateDue(autoPolicy)
+        assertEquals(listOf("retry"), store.load().threads.single().queuedTriggerIds)
+
+        Engine(store, acceptRouter(), newId = ::ids, now = { 1000 }).evaluateDue(autoPolicy)
+        assertTrue(store.load().threads.single().queuedTriggerIds.isEmpty())
+    }
+
+    @Test
+    fun `scope admission table can reject an accepted scope`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, Router { batch, _, _, _ ->
+            batch.map { Decision.Accept(it.id, "work", "secret", "ok") }
+        })
+        e.receive(trigger("a"))
+        val policy = autoPolicy.copy(
+            admissionTables = mapOf(
+                "s1" to mapOf(
+                    "*" to AdmissionTable.DEFAULT.copy(allowedAddressed = AdmissionCell.Explicit),
+                    "secret" to AdmissionTable.DEFAULT.copy(allowedAddressed = AdmissionCell.Ignore),
+                ),
+            ),
+        )
+        val outcome = e.evaluateDue(policy).single()
+        assertTrue(outcome is EvalOutcome.NotAdmitted)
+    }
+
+    @Test
     fun `batch accepts only the strongest seed`() = runTest {
         val store = MemorySuperagentStore()
         val e = engine(store, acceptRouter())

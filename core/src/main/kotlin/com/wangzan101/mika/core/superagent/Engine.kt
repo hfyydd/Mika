@@ -138,6 +138,9 @@ class Engine(
                 }
                 outcomes += apply(store, decision, trigger, gateResult, policy)
             }
+            val incomplete = decisions.size != admitted.size ||
+                decisions.any { it is Decision.Ignore && it.reason == "router output missing entry" }
+            if (incomplete) continue
             store.save(store.load().let { s ->
                 s.copy(threads = s.threads.map { if (it.key == thread.key) it.copy(queuedTriggerIds = emptyList()) else it })
             })
@@ -320,6 +323,19 @@ class Engine(
                     }
                     current.save(rejected)
                     return EvalOutcome.NotAdmitted(trigger.id, "accept mode is off")
+                }
+                val identity = when {
+                    trigger.actor.isBlank() -> Identity.Unknown
+                    policy.allows(trigger.source.instance, trigger.actor) -> Identity.Allowed
+                    else -> Identity.Unlisted
+                }
+                val targeting = if (gateResult.basis.endsWith("_address")) Targeting.Address else Targeting.Followup
+                if (policy.admissionTable(trigger.source.instance, decision.scope).cell(identity, targeting) == AdmissionCell.Ignore) {
+                    val rejected = decisionState(state, trigger, Decision.Ignore(trigger.id, "not_admitted:scope")) {
+                        it.copy(filtered = "scope_not_admitted")
+                    }
+                    current.save(rejected)
+                    return EvalOutcome.NotAdmitted(trigger.id, "scope not admitted")
                 }
                 val mandate = Mandate(
                     policyVersion = policy.version, sourceInstance = trigger.source.instance, scope = decision.scope, strength = gateResult.strength,

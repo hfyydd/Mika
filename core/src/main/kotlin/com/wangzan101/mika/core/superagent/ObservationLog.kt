@@ -12,9 +12,13 @@ object ObservationLog {
 
     /** 「转正」只把规则加入 enabledRules;它仍要等 Router 给 matchedRule、方向、动机引用和宿主校验。 */
     fun promote(policy: Policy, state: SuperagentState, triggerId: String): Policy {
-        // Missing audit references are intentionally ignored, never promoted by id collision.
-        val trigger = state.triggers.firstOrNull { it.id == triggerId } ?: return policy
-        return PolicyEditor.enableRule(policy, trigger.source.instance, ruleId(trigger))
+        val decision = state.decisions[triggerId] as? Decision.Accept ?: return policy
+        val rule = decision.matchedRule.ifBlank { decision.reason }
+        if (rule.isBlank()) return policy
+        val sourceInstance = state.tickets.firstOrNull { triggerId in it.triggerIds }?.mandate?.sourceInstance
+            ?: state.triggers.firstOrNull { it.id == triggerId }?.source?.instance
+            ?: return policy
+        return PolicyEditor.enableRule(policy, sourceInstance, rule)
     }
 
     fun ruleId(trigger: Trigger) = "${trigger.source.kind}:${trigger.source.instance}:addressed"
