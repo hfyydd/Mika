@@ -27,7 +27,8 @@ class SuperagentRuntimeTest {
             newId = { "id-${store.load().tickets.size}-${store.load().assignments.size}" },
             now = { 100 },
         )
-        val effects = EffectQueue(MemoryEffectStore(), now = { 100 })
+        val effectStore = MemoryEffectStore()
+        val effects = EffectQueue(effectStore, now = { 100 })
         val executor = TaskHostExecutor(host = { ChildResult(it.id, ChildPhase.Completed, "done") })
         val runner = Runner(engine, executor, effects, now = { 100 })
         val runtime = SuperagentRuntime(
@@ -64,5 +65,24 @@ class SuperagentRuntimeTest {
         assertEquals(listOf("new"), recovered.map { it.id })
         assertEquals(AssignmentStatus.Ended, engine.snapshot().assignments.single { it.id == "old" }.status)
         assertEquals("interrupted", engine.snapshot().assignments.single { it.id == "old" }.outcome)
+    }
+
+    @Test
+    fun `recovery skips a started execution and replays only pending assignment`() = runTest {
+        val store = MemorySuperagentStore()
+        val engine = Engine(store, router = { batch, _, _, _ -> batch.map { Decision.Accept(it.id, it.text, "phone", "explicit") } }, now = { 100 })
+        val running = Assignment("running", "ticket", status = AssignmentStatus.Running, startedAtMs = 1)
+        val pending = Assignment("pending", "ticket")
+        store.save(engine.snapshot().copy(assignments = listOf(running, pending)))
+        val effectStore = MemoryEffectStore()
+        val effects = EffectQueue(effectStore, now = { 100 })
+        effects.submit("assignment:running", EffectKind.Assignment, "ticket", assignmentId = "running")
+        effects.submit("assignment:pending", EffectKind.Assignment, "ticket", assignmentId = "pending")
+        effectStore.all().forEach { record -> effectStore.save(record.copy(state = EffectState.Attempting)) }
+        val runtime = SuperagentRuntime(engine, Runner(engine, executor = { _, _ -> ExecutorReport(ReportState.Ready, "ok") }), ::policy, effects = effects)
+        runtime.recover()
+        val states = effects.all().associate { it.id to it.state }
+        assertEquals(EffectState.Done, states.getValue("assignment:running"))
+        assertEquals(EffectState.Pending, states.getValue("assignment:pending"))
     }
 }

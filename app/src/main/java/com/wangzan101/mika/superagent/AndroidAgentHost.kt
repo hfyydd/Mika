@@ -232,7 +232,7 @@ class AndroidAgentHost(private val context: Context) : TaskHost {
             val end = agent.run(spec, com.wangzan101.mika.core.run.RunInbox())
             return when (end) {
                 is TaskState.Succeeded -> ChildResult(spec.id, ChildPhase.Completed, end.answer)
-                is TaskState.Failed -> ChildResult(spec.id, ChildPhase.Completed, end.reason)
+                is TaskState.Failed -> ChildResult(spec.id, ChildPhase.Unknown, end.reason)
                 TaskState.Cancelled -> ChildResult(spec.id, ChildPhase.Interrupted, "cancelled")
                 else -> ChildResult(spec.id, ChildPhase.Unknown, "no result")
             }

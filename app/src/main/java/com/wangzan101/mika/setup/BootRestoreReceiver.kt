@@ -16,6 +16,16 @@ class BootRestoreReceiver : BootRestoreHandler() {
         // 换了时区:跟随设备时区的当地时间计划立刻按新时区重算(内部会重新布置闹钟),显式钉了其他时区的不动
         if (intent.action == Intent.ACTION_TIMEZONE_CHANGED) TriggerRuntime.syncTimeZone(context)
         // 开机时局域网那种电脑连接开着就重新监听(USB 那种不跨重启:换了开机编号,这里已按关着算,上次的连接信息也清掉)
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED) (context.applicationContext as com.wangzan101.mika.MikaApp).mcp.ensureRunning()
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+            val app = context.applicationContext as com.wangzan101.mika.MikaApp
+            app.mcp.ensureRunning()
+            // 开关落过盘就延续 Super 服务;开机广播里也要防系统拒绝前台启动。
+            val enabled = runCatching {
+                com.wangzan101.mika.core.superagent.FileSuperagentSettingsStore(
+                    java.io.File(app.filesDir, "superagent/settings.json").toPath(),
+                ).load().enabled
+            }.getOrDefault(false)
+            runCatching { if (enabled) com.wangzan101.mika.superagent.SuperagentRuntimeService.start(app) }
+        }
     }
 }

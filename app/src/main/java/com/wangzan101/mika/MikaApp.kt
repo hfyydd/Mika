@@ -67,6 +67,7 @@ import com.wangzan101.mika.task.RemoteTaskHub
 import com.wangzan101.mika.task.FileChildRunStore
 import com.wangzan101.mika.task.TriggerRuntime
 import com.wangzan101.mika.superagent.bridge.MikaSuperRuntimeHost
+import com.wangzan101.mika.superagent.SuperagentRuntimeService
 
 /**
  * App 容器:进程里共用的服务都在这里建一份,经各自的 Owner 接口交给安卓入口(界面、服务、广播、provider),
@@ -357,6 +358,17 @@ class MikaApp : Application(), WebOwner, SandboxOwner, TaskEnvironment.Owner, Ph
         scope.launch(Dispatchers.IO) { runCatching { com.wangzan101.mika.about.ApkUpdater(this@MikaApp).dropInstalled() } }
         // 运行环境没准备好(首次启动、Mika 升级后)就在后台准备,不联网、对用户不可见
         RuntimePreparer.ensure(this)
+        // 开关落过盘就拉起 Super 服务;系统禁止时不能让 App 启动失败,下次打开 Super 页还能重试。
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                if (com.wangzan101.mika.core.superagent.FileSuperagentSettingsStore(
+                        java.io.File(filesDir, "superagent/settings.json").toPath(),
+                    ).load().enabled
+                ) {
+                    SuperagentRuntimeService.start(this@MikaApp)
+                }
+            }
+        }
         // 沙箱就绪(启动时已就绪,或刚装好)就把技能目录核对一次:App 更新带来的脚本马上能用
         scope.launch {
             SandboxState.get(this@MikaApp).status.first { it is SandboxStatus.Ready }

@@ -45,6 +45,8 @@ class EngineTest {
         val e = engine(store, acceptRouter())
         assertEquals(Engine.ReceiveResult.Stored, e.receive(trigger("a")))
         assertEquals(Engine.ReceiveResult.Duplicate, e.receive(trigger("a2", externalId = "e-a")))
+        store.save(store.load().copy(triggers = emptyList()))
+        assertEquals(Engine.ReceiveResult.Duplicate, e.receive(trigger("a3", externalId = "e-a")))
     }
 
     @Test
@@ -447,12 +449,45 @@ class EngineTest {
         e.receive(trigger("a"))
         val ticket = (e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated).ticket
 
-        // 未订阅线程上的人的消息先进 Eval;Router 判 attach。
-        e.receive(trigger("b", threadKey = "t2", text = "about ticket ${ticket.id}", externalId = "e-b"))
+        // 同线程的人的消息先按跟进直通;这里把它显式放回 Eval,验证 Router attach 的宿主核对。
+        e.receive(trigger("b", text = "about ticket ${ticket.id}", externalId = "e-b"))
+        store.save(store.load().let { state ->
+            state.copy(
+                threads = state.threads.map { if (it.key == "t1") it.copy(queuedTriggerIds = listOf("b")) else it },
+                tickets = state.tickets.map { if (it.id == ticket.id) it.copy(inputs = emptyList()) else it },
+                dispositions = state.dispositions + ("b" to state.dispositions.getValue("b").copy(requeued = true, decisionId = null)),
+            )
+        })
         val attachRouter = Router { batch, _, _, _ -> batch.map { Decision.Attach(it.id, ticket.id, "points at it") } }
         val e2 = Engine(store, attachRouter, newId = ::ids, now = { 2000 })
-        val outcomes = e2.evaluateDue(autoPolicy)
-        assertTrue(outcomes[0] is EvalOutcome.Attached)
+        val outcomes = e2.evaluateDue(autoPolicy.copy(allowedActors = mapOf("s1" to listOf("alice", "ci-bot"))))
+        assertTrue(outcomes.any { it is EvalOutcome.Attached })
+        assertEquals(1, store.load().tickets.single { it.id == ticket.id }.inputs.size)
+    }
+
+    @Test
+    fun `router cannot attach across threads or stop another actor ticket`() = runTest {
+        val store = MemorySuperagentStore()
+        val e = engine(store, acceptRouter())
+        e.receive(trigger("a"))
+        val ticket = (e.evaluateDue(autoPolicy)[0] as EvalOutcome.TicketCreated).ticket
+
+        e.receive(trigger("cross", threadKey = "other", text = "attach ${ticket.id}", externalId = "e-cross"))
+        e.receive(trigger("intruder", actor = "mallory", threadKey = "t1", text = "stop ${ticket.id}", externalId = "e-intruder"))
+        store.save(store.load().let { state ->
+            state.copy(
+                threads = state.threads.map { if (it.key == "t1") it.copy(queuedTriggerIds = listOf("intruder")) else it },
+                dispositions = state.dispositions + ("intruder" to state.dispositions.getValue("intruder").copy(requeued = true, decisionId = null)),
+            )
+        })
+        val outcomes = Engine(store, Router { batch, _, _, _ ->
+            batch.map {
+                if (it.id == "cross") Decision.Attach(it.id, ticket.id, "cross") else Decision.Stop(it.id, ticket.id, "intruder")
+            }
+        }, newId = ::ids, now = { 2000 }).evaluateDue(autoPolicy.copy(allowedActors = mapOf("s1" to listOf("alice", "mallory"))))
+
+        assertTrue("outcomes=$outcomes", outcomes.all { it is EvalOutcome.Ignored })
+        assertEquals(TicketStatus.Open, store.load().tickets.single { it.id == ticket.id }.status)
         assertEquals(1, store.load().tickets.single { it.id == ticket.id }.inputs.size)
     }
 

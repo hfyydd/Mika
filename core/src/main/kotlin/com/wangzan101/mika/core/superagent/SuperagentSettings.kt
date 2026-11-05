@@ -29,13 +29,12 @@ class FileSuperagentSettingsStore(private val path: Path) : SuperagentSettingsSt
     override fun load(): SuperagentSettings = if (!Files.exists(path)) {
         SuperagentSettings()
     } else {
-        runCatching { json.decodeFromString<SuperagentSettings>(path.toFile().readText()) }.getOrElse { SuperagentSettings() }
+        runCatching { json.decodeFromString<SuperagentSettings>(path.toFile().readText()) }
+            .getOrElse {
+                archiveCorruptStore(path)
+                SuperagentSettings()
+            }
     }
 
-    override fun save(settings: SuperagentSettings) {
-        val tmp = path.resolveSibling(path.fileName.toString() + ".tmp")
-        Files.createDirectories(path.parent)
-        tmp.toFile().writeText(json.encodeToString(settings))
-        Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-    }
+    @Synchronized override fun save(settings: SuperagentSettings) = writeAtomic(path, json.encodeToString(settings))
 }

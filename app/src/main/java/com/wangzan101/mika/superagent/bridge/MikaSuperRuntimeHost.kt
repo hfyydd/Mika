@@ -19,12 +19,13 @@ import kotlinx.coroutines.flow.combine
 class MikaSuperRuntimeHost(context: Context) {
     private val app = context.applicationContext
     private val _userOn = MutableStateFlow(false)
+    private val _serviceReady = MutableStateFlow(false)
     private val bridge = SuperagentBridge.get(app)
 
     init {
         SuperagentRuntimeHosts.register(object : SuperagentRuntimeHost {
-            override fun onStarted() { _userOn.value = true }
-            override fun onStopped() { _userOn.value = false }
+            override fun onStarted() { _serviceReady.value = true }
+            override fun onStopped() { _serviceReady.value = false }
         })
         _userOn.value = com.wangzan101.mika.core.superagent.FileSuperagentSettingsStore(
             java.io.File(app.filesDir, "superagent/settings.json").toPath(),
@@ -32,7 +33,8 @@ class MikaSuperRuntimeHost(context: Context) {
     }
 
     /** 用户开关与服务 ready 同时成立才算 active。 */
-    val superMode: StateFlow<Boolean> = combine(_userOn, bridge.enabled) { userOn, ready -> userOn && ready }
+    val superMode: StateFlow<Boolean> =
+        combine(_userOn, _serviceReady, bridge.enabled) { userOn, serviceReady, ready -> userOn && serviceReady && ready }
         .stateIn(CoroutineScope(SupervisorJob() + Dispatchers.Default), SharingStarted.Eagerly, false)
 
     fun setEnabled(value: Boolean) {

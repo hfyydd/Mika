@@ -53,7 +53,7 @@ class TelegramSourceTest {
         assertEquals("-200", triggers[1].threadKey)
 
         server.enqueue(MockResponse().setBody("""{"ok":true,"result":[]}"""))
-        source.poll(SuperagentState(readPositions = mapOf("main" to "11")))
+        source.poll(SuperagentState(readPositions = mapOf("telegram:main" to "11")))
         server.takeRequest()
         val request = server.takeRequest()
         assertTrue(request.requestUrl?.queryParameter("offset") == "12")

@@ -25,7 +25,7 @@ class TelegramReplyChannel(
     private val http: OkHttpClient = OkHttpClient(),
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : ReplyChannel {
-    override suspend fun send(envelope: ReplyEnvelope): String {
+    override suspend fun send(envelope: ReplyEnvelope, effectId: String): String {
         val payload = json.encodeToString(
             kotlinx.serialization.json.buildJsonObject {
                 put("chat_id", kotlinx.serialization.json.JsonPrimitive(envelope.threadKey))

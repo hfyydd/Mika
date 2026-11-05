@@ -35,7 +35,10 @@ class Engine(
     /** 来源交来一个事件:幂等入库 → 订阅直通(不带授权)→ 该进 Eval 的排队。 */
     fun receive(trigger: Trigger): ReceiveResult {
         val state = store.load()
-        if (state.triggers.any { it.source == trigger.source && it.externalId == trigger.externalId })
+        val externalKey = "${trigger.source.kind}:${trigger.source.instance}:${trigger.externalId}"
+        if (state.triggers.any { it.source == trigger.source && it.externalId == trigger.externalId } ||
+            externalKey in state.seenExternalIds
+        )
             return ReceiveResult.Duplicate
 
         val ownerIds = followupOwners(trigger, state.tickets, state.dispositions).toSet()
@@ -70,21 +73,23 @@ class Engine(
         val newThread = if (queued) thread.copy(queuedTriggerIds = thread.queuedTriggerIds + trigger.id) else thread
         if (threadIndex >= 0) threads[threadIndex] = newThread else threads.add(newThread)
 
+        val admittedAtMs = now()
         val disposition = TriggerDisposition(
             triggerId = trigger.id,
             fanout = fanoutTicketIds.distinct(),
             context = contextTicketIds.distinct(),
             requeued = queued,
             atMs = trigger.atMs,
-            admittedAtMs = trigger.atMs.takeIf { queued },
-            evalDeadlineAtMs = (trigger.atMs + evalDeadlineMs).takeIf { queued },
+            admittedAtMs = admittedAtMs.takeIf { queued },
+            evalDeadlineAtMs = (admittedAtMs + evalDeadlineMs).takeIf { queued },
         )
         store.save(state.copy(
             triggers = (state.triggers + trigger).takeLast(MAX_TRIGGERS),
             threads = threads,
             tickets = tickets,
             dispositions = state.dispositions + (trigger.id to disposition),
-            readPositions = state.readPositions + (trigger.source.instance to trigger.externalId),
+            readPositions = state.readPositions + ("${trigger.source.kind}:${trigger.source.instance}" to trigger.externalId),
+            seenExternalIds = state.seenExternalIds + (externalKey to trigger.id),
         ))
         return ReceiveResult.Stored
     }
@@ -335,14 +340,15 @@ class Engine(
                 return EvalOutcome.TicketCreated(ticket, assignment)
             }
             is Decision.Attach -> {
-                val ticket = state.tickets.firstOrNull { it.id == decision.ticketId } ?: return EvalOutcome.Ignored(
-                    Decision.Ignore(trigger.id, "attach target missing").also { missing ->
-                        current.save(decisionState(state, trigger, missing) { it.copy(filtered = "attach_target_missing") })
-                    }
-                )
+                val ticket = routedTicket(state, trigger, decision.ticketId, policy, "attach")
+                    ?: return EvalOutcome.Ignored(
+                        Decision.Ignore(trigger.id, "attach target unavailable").also { missing ->
+                            current.save(decisionState(state, trigger, missing) { it.copy(filtered = "attach_target_unavailable") })
+                        }
+                    )
                 val withInput = ticket.copy(
                     inputs = ticket.inputs + TicketInput(newId(), ticket.id, trigger.id, trigger.atMs),
-                    status = TicketStatus.Open, ended = null, updatedAtMs = now(),
+                    updatedAtMs = now(),
                 )
                 val recorded = decisionState(state, trigger, decision) { disposition ->
                     disposition.copy(context = (disposition.context + ticket.id).distinct())
@@ -353,9 +359,9 @@ class Engine(
                 return EvalOutcome.Attached(withInput)
             }
             is Decision.Stop -> {
-                val ticket = state.tickets.firstOrNull { it.id == decision.ticketId }
-                    ?: return EvalOutcome.Ignored(Decision.Ignore(trigger.id, "stop target missing").also { missing ->
-                        current.save(decisionState(state, trigger, missing) { it.copy(filtered = "stop_target_missing") })
+                val ticket = routedTicket(state, trigger, decision.ticketId, policy, "stop")
+                    ?: return EvalOutcome.Ignored(Decision.Ignore(trigger.id, "stop target unavailable").also { missing ->
+                        current.save(decisionState(state, trigger, missing) { it.copy(filtered = "stop_target_unavailable") })
                     })
                 val ended = ticket.copy(
                     status = TicketStatus.Ended,
@@ -372,6 +378,21 @@ class Engine(
                 current.save(decisionState(state, trigger, decision))
                 return EvalOutcome.Ignored(decision)
             }
+        }
+    }
+
+    /** Router 输出只是候选;attach/stop 必须由同线程、名单内的人指向开放票。 */
+    private fun routedTicket(
+        state: SuperagentState,
+        trigger: Trigger,
+        ticketId: String,
+        policy: Policy,
+        action: String,
+    ): Ticket? {
+        if (!trigger.isPerson || !policy.allows(trigger.source.instance, trigger.actor)) return null
+        return state.tickets.firstOrNull {
+            it.id == ticketId && it.threadKey == trigger.threadKey && it.isOpen &&
+                it.mandate.actor == trigger.actor
         }
     }
 

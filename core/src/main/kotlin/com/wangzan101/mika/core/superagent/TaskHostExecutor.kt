@@ -62,16 +62,19 @@ class TaskHostExecutor(
         const val TRIGGER_TEXT_LIMIT = 8_000
         const val THREAD_LIMIT = 2_000
 
-        /** Scope 登记句只做保守映射;认不出的默认仍然限制在 Mika 的三个工作面。 */
+        /** Scope 登记句只做保守映射;认不出的授权不给能力,并退到只读。 */
         fun mikaRunScope(scope: String): MikaRunScope {
             val text = scope.lowercase()
-            val readOnly = Regex("\\b(read|observe|research|summar|analyze)\\b").containsMatchIn(text) ||
-                listOf("read only", "read-only", "只读", "观察", "调研", "查").any { it in text }
             val capabilities = buildSet {
-                if ("phone" in text || "app" in text || "手机" in text || "app" in scope.lowercase()) add("phone")
+                if ("phone" in text || "app" in text || "手机" in text) add("phone")
                 if ("web" in text || "网页" in text || "网站" in text || "browser" in text) add("web")
                 if ("sandbox" in text || "shell" in text || "代码" in text || "文件" in text) add("sandbox")
-            }.ifEmpty { setOf("phone", "web", "sandbox") }
+            }
+            val readIntent = Regex("""\b(read|observe|research|summar\w*|analy\w*|report)\b""").containsMatchIn(text) ||
+                listOf("read only", "read-only", "只读", "观察", "调研", "查").any { it in text }
+            val writeIntent = Regex("""\b(open|click|type|send|post|create|edit|delete|install|run|execute)\b""").containsMatchIn(text) ||
+                listOf("打开", "点击", "输入", "发送", "发布", "创建", "编辑", "删除", "安装", "运行", "执行").any { it in text }
+            val readOnly = capabilities.isEmpty() || (readIntent && !writeIntent)
             return MikaRunScope(capabilities, readOnly)
         }
     }

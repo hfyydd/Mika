@@ -48,6 +48,14 @@ class SuperagentLocalSource : Source {
         return ready
     }
 
+    override suspend fun rollback(triggers: List<Trigger>) {
+        if (triggers.isEmpty()) return
+        synchronized(queue) {
+            triggers.asReversed().forEach { queue.addFirst(it) }
+        }
+        _history.update { current -> current - triggers.toSet() }
+    }
+
     fun clearArchived() {
         _history.value = emptyList()
     }

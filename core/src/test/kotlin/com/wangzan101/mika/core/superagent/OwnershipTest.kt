@@ -47,6 +47,12 @@ class OwnershipTest {
     }
 
     @Test
+    fun `policy revoked ticket cannot be revived as followup`() {
+        val tickets = listOf(ticket("revoked", status = TicketStatus.Ended, endedBy = "policy"))
+        assertEquals(emptyList<String>(), followupOwners(trigger("a"), tickets))
+    }
+
+    @Test
     fun `handback and read only context do not own`() {
         val handback = TriggerDisposition(
             triggerId = "a", fanout = listOf("tk1"), handbacks = listOf(Handback("tk1", "outside scope", 2)), atMs = 1,

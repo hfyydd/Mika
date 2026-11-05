@@ -27,15 +27,14 @@ class FilePolicyStore(private val path: Path) : PolicyStore {
     override fun load(): Policy = if (!Files.exists(path)) {
         Policy(version = DEFAULT_POLICY_VERSION)
     } else {
-        runCatching { json.decodeFromString<Policy>(path.toFile().readText()) }.getOrDefault(Policy(version = DEFAULT_POLICY_VERSION))
+        runCatching { json.decodeFromString<Policy>(path.toFile().readText()) }
+            .getOrElse {
+                archiveCorruptStore(path)
+                Policy(version = DEFAULT_POLICY_VERSION)
+            }
     }
 
-    override fun save(policy: Policy) {
-        val tmp = path.resolveSibling(path.fileName.toString() + ".tmp")
-        Files.createDirectories(path.parent)
-        tmp.toFile().writeText(json.encodeToString(policy))
-        Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-    }
+    @Synchronized override fun save(policy: Policy) = writeAtomic(path, json.encodeToString(policy))
 
 }
 

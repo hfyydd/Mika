@@ -4,6 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /** Worker 对用户暴露的报告；Super 模式把它映射到聊天卡片。 */
 data class SuperWorkStatus(
@@ -26,6 +27,7 @@ class SuperagentBridge {
     val statuses: StateFlow<Map<String, SuperWorkStatus>> = _statuses.asStateFlow()
 
     /** 本地聊天这个对话已经建到哪个 Ticket。 */
+    private val stateLock = Any()
     private val tickets = HashMap<String, String>()
 
     /** 还在 Router/Eval 前的 Trigger;判完以后用它把失败原因送回聊天卡片。 */
@@ -44,7 +46,7 @@ class SuperagentBridge {
     /** Runtime 收完本地来源的一批消息后可按状态推进卡片。 */
     fun report(conversationId: String, ticketId: String, goal: String, line: String) {
         val conversation = localConversation(conversationId)
-        synchronized(tickets) {
+        synchronized(stateLock) {
             if (tickets[conversation] == null) tickets[conversation] = ticketId
         }
         val knownGoal = _statuses.value[conversation]?.goal
@@ -57,36 +59,40 @@ class SuperagentBridge {
 
     /** Runtime 接受了这条请求:把 pending 换成真正的 Ticket,后面的进度都按它校验。 */
     fun accepted(conversationId: String, ticketId: String, goal: String) {
-        synchronized(tickets) {
+        synchronized(stateLock) {
             tickets[conversationId] = ticketId
-            pendingTriggers.values.removeAll(setOf(conversationId))
-            pendingGoals.values.removeAll(setOf(conversationId))
+            pendingTriggers.entries.removeAll { it.value == conversationId }
+            pendingGoals.entries.removeAll { it.value == conversationId }
         }
         val request = _statuses.value[conversationId]?.goal ?: goal
-        set(_statuses) { it + (conversationId to SuperWorkStatus(ticketId, request, "working")) }
+        _statuses.update { it + (conversationId to SuperWorkStatus(ticketId, request, "working")) }
     }
 
     fun updateStatus(conversationId: String, ticketId: String, goal: String, line: String) {
-        val bound = synchronized(tickets) { tickets[conversationId] }
+        val bound = synchronized(stateLock) { tickets[conversationId] }
         if (bound != null && bound != ticketId) return
-        set(_statuses) { it + (conversationId to SuperWorkStatus(ticketId, goal, line)) }
+        _statuses.update { it + (conversationId to SuperWorkStatus(ticketId, goal, line)) }
     }
 
     fun clear(conversationId: String) {
-        synchronized(tickets) {
+        synchronized(stateLock) {
             tickets.remove(conversationId)
-            pendingTriggers.values.remove(conversationId)
-            pendingGoals.values.remove(conversationId)
+            pendingTriggers.entries.removeAll { it.value == conversationId }
+            pendingGoals.entries.removeAll { it.value == conversationId }
         }
-        set(_statuses) { it - conversationId }
+        _statuses.update { it - conversationId }
     }
 
     /** Router 明确不接这条 Super 请求:不能把用户留在永远转圈的卡片上。 */
     fun rejected(triggerId: String, reason: String) {
-        val conversation = synchronized(pendingTriggers) { pendingTriggers.remove(triggerId) } ?: return
-        val goal = synchronized(pendingGoals) { pendingGoals.remove(triggerId) }.orEmpty()
-        synchronized(tickets) { tickets.remove(conversation) }
-        set(_statuses) { it + (conversation to SuperWorkStatus(triggerId, goal, "failed", reason)) }
+        val conversation: String
+        val goal: String
+        synchronized(stateLock) {
+            conversation = pendingTriggers.remove(triggerId) ?: return
+            goal = pendingGoals.remove(triggerId).orEmpty()
+            tickets.remove(conversation)
+        }
+        _statuses.update { it + (conversation to SuperWorkStatus(triggerId, goal, "failed", reason)) }
     }
 
     fun statusFor(conversationId: String): SuperWorkStatus? = _statuses.value[conversationId]
@@ -98,30 +104,28 @@ class SuperagentBridge {
         val externalId = "m${java.util.UUID.randomUUID()}"
         val triggerId = SuperagentLocalSource.triggerId(conversationId, externalId)
         sourceRef?.send(conversationId, externalId = externalId, actor = "owner", text = text)
-        synchronized(pendingTriggers) { pendingTriggers[triggerId] = conversationId }
-        synchronized(pendingGoals) { pendingGoals[triggerId] = text }
-        set(_statuses) { it + (conversationId to SuperWorkStatus(triggerId, text, "working")) }
+        synchronized(stateLock) {
+            pendingTriggers[triggerId] = conversationId
+            pendingGoals[triggerId] = text
+        }
+        _statuses.update { it + (conversationId to SuperWorkStatus(triggerId, text, "working")) }
         return true
     }
 
     private fun reset() {
-        synchronized(tickets) {
+        synchronized(stateLock) {
             tickets.clear()
             pendingTriggers.clear()
             pendingGoals.clear()
         }
-        _statuses.value = emptyMap()
+        _statuses.update { emptyMap() }
     }
 
     private fun localConversation(raw: String) = raw.removePrefix("chat:")
 
-    private fun <T> set(target: MutableStateFlow<T>, transform: (T) -> T) {
-        target.value = transform(target.value)
-    }
-
     companion object {
-        private var shared: SuperagentBridge? = null
-        private var sourceRef: SuperagentLocalSource? = null
+        @Volatile private var shared: SuperagentBridge? = null
+        @Volatile private var sourceRef: SuperagentLocalSource? = null
 
         /** 桥跟着 App 进程；入口服务、任务服务和聊天页用同一份。 */
         fun get(context: Context): SuperagentBridge {

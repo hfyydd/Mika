@@ -21,7 +21,7 @@ class RunnerOutboxTest {
         val created = engine.snapshot().assignments.single()
         val effects = EffectQueue(MemoryEffectStore(), now = { 100 })
         val envelopes = mutableListOf<ReplyEnvelope>()
-        val outbox = SourceOutbox(effects, mapOf("telegram:main" to ReplyChannel { envelopes += it; "receipt" }))
+        val outbox = SourceOutbox(effects, mapOf("telegram:main" to ReplyChannel { envelope, _ -> envelopes += envelope; "receipt" }))
         val runner = Runner(engine, TaskHostExecutor(host = { ChildResult(it.id, ChildPhase.Completed, "done") }), effects, outbox)
 
         runner.runAssignment(created.id)

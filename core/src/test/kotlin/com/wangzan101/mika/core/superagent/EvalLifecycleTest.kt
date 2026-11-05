@@ -60,17 +60,17 @@ class EvalLifecycleTest {
         val store = MemorySuperagentStore()
         val e = failingEngine(store)
         e.receive(trigger("a", atMs = 800L))
-
+        clock = 1200L
         e.evaluateDue(policy)
         assertEquals(1, store.load().dispositions.getValue("a").evalRequeues)
         assertEquals(listOf("a"), store.load().threads.single().queuedTriggerIds)
 
-        clock = 1200L
+        clock = 1400L
         e.evaluateDue(policy)
         assertEquals(2, store.load().dispositions.getValue("a").evalRequeues)
         assertEquals(listOf("a"), store.load().threads.single().queuedTriggerIds)
 
-        clock = 1400L
+        clock = 1600L
         e.evaluateDue(policy)
         val disposition = store.load().dispositions.getValue("a")
         assertTrue(disposition.evalRequeues >= 2)

@@ -24,7 +24,7 @@ class SourceOutboxTest {
         val sent = mutableListOf<ReplyEnvelope>()
         val outbox = SourceOutbox(
             effects,
-            mapOf("telegram:main" to ReplyChannel { envelope ->
+            mapOf("telegram:main" to ReplyChannel { envelope, _ ->
                 if (sent.isNotEmpty()) error("offline")
                 clock = 2_000
                 sent += envelope

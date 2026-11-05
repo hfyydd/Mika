@@ -13,23 +13,27 @@ import kotlinx.coroutines.withContext
  * Ticket 的 threadKey 由 LocalChatSource 固定为 conversationId。
  */
 class SuperagentLocalReplyChannel(private val context: Context) : ReplyChannel {
-    override suspend fun send(envelope: ReplyEnvelope): String = withContext(Dispatchers.IO) {
+    override suspend fun send(envelope: ReplyEnvelope, effectId: String): String = withContext(Dispatchers.IO) {
         val conversationId = envelope.threadKey.removePrefix("chat:")
         if (envelope.source.kind != ChatSourceKinds.CHAT) return@withContext ""
         val text = envelope.text.ifBlank { return@withContext "empty:local" }
-        ConversationStore.shared(context).append(
-            conversationId,
-            Turn(
-                userText = envelope.triggerText,
-                outcome = text,
-                status = when {
-                    envelope.deliverHere -> "unverified"
-                    else -> "succeeded"
-                },
-                runId = "super-${envelope.ticketId}",
-                source = "super",
-            ),
-        )
+        val store = ConversationStore.shared(context)
+        val runId = "super-reply:$effectId"
+        if (store.turns(conversationId).none { it.runId == runId }) {
+            store.append(
+                conversationId,
+                Turn(
+                    userText = envelope.triggerText,
+                    outcome = text,
+                    status = when {
+                        envelope.deliverHere -> "unverified"
+                        else -> "succeeded"
+                    },
+                    runId = runId,
+                    source = "super",
+                ),
+            )
+        }
         "local:${conversationId}:${envelope.ticketId}"
     }
 }

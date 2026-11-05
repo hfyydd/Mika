@@ -8,6 +8,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.util.Log
 import android.os.IBinder
 import com.wangzan101.mika.MikaApp
 import com.wangzan101.mika.R
@@ -19,6 +20,7 @@ import com.wangzan101.mika.core.superagent.FileEffectStore
 import com.wangzan101.mika.core.superagent.FilePolicyStore
 import com.wangzan101.mika.core.superagent.FileSuperagentSettingsStore
 import com.wangzan101.mika.core.superagent.FileSuperagentStore
+import com.wangzan101.mika.core.superagent.DEFAULT_POLICY_VERSION
 import com.wangzan101.mika.core.superagent.LlmRouter
 import com.wangzan101.mika.core.superagent.Runner
 import com.wangzan101.mika.core.superagent.SourceOutbox
@@ -47,6 +49,8 @@ class SuperagentRuntimeService : Service() {
     private val localSource = SuperagentLocalSource()
     private val statusObserver = SuperagentStatusObserver(this)
     private var runtime: SuperagentRuntime? = null
+    private var policyStore: FilePolicyStore? = null
+    private var watchedPolicy: com.wangzan101.mika.core.superagent.Policy? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -90,7 +94,8 @@ class SuperagentRuntimeService : Service() {
     private fun startRuntime(settings: SuperagentSettings) {
         if (runtime != null) return
         val root = dataRoot()
-        val policyStore = FilePolicyStore(root.resolve("policy.json").toPath())
+        val policyStore = FilePolicyStore(root.resolve("policy.json").toPath()).also { this.policyStore = it }
+        val initialPolicy = bootstrapPolicy(policyStore)
         val model = ProviderStore.get(this).modelFor(ModelRole.Light, ModelSession.of("superagent-local"))
             ?: ProviderStore.get(this).modelFor(ModelRole.Main, ModelSession.of("superagent-local"))
             ?: throw IllegalStateException("super-agent router model unavailable")
@@ -111,20 +116,31 @@ class SuperagentRuntimeService : Service() {
             effects,
             localOutbox,
         )
+        val triggerArchive = FileTriggerArchive(this)
         runtime = SuperagentRuntime(
             engine = engine,
             runner = runner,
-            policy = { mergePolicy(policyStore.load()) },
+            policy = { policyStore.load() },
             sources = listOf(localSource),
             effects = effects,
             outbox = localOutbox,
             onEvalOutcomes = ::reportOutcomes,
+            onTriggerStored = { trigger -> triggerArchive.append(trigger) },
         ).also { runtime ->
+            watchedPolicy = initialPolicy
             runtime.start(scope, settings.pollIntervalMs)
             scope.launch {
                 while (true) {
-                    kotlinx.coroutines.delay(1000)
-                    statusObserver.apply(engine.snapshot())
+                    kotlinx.coroutines.delay(5000)
+                    runCatching {
+                        val next = bootstrapPolicy(policyStore)
+                        val previous = watchedPolicy
+                        if (next != previous) {
+                            engine.policyChanged(next)
+                            watchedPolicy = next
+                        }
+                        statusObserver.apply(engine.snapshot())
+                    }.onFailure { Log.w("SuperagentRuntime", "status refresh failed", it) }
                 }
             }
         }
@@ -153,16 +169,17 @@ class SuperagentRuntimeService : Service() {
 
     private fun localConversation(threadKey: String) = threadKey.removePrefix("chat:")
 
-    private fun mergePolicy(
-        policy: com.wangzan101.mika.core.superagent.Policy,
-    ): com.wangzan101.mika.core.superagent.Policy {
-        var merged = policy
-        val localActors = merged.allowedActors[LOCAL_SOURCE].orEmpty()
-        if ("owner" !in localActors) {
-            merged = merged.copy(allowedActors = merged.allowedActors +
-                (LOCAL_SOURCE to (localActors + "owner")))
-        }
-        return merged
+    /** 只在从未配置过策略时给本机 Super 一个可用起点；之后完全以文件为准。 */
+    private fun bootstrapPolicy(store: FilePolicyStore): com.wangzan101.mika.core.superagent.Policy {
+        val loaded = store.load()
+        val untouched = loaded == com.wangzan101.mika.core.superagent.Policy(version = DEFAULT_POLICY_VERSION)
+        val policy = if (untouched) com.wangzan101.mika.core.superagent.Policy(
+            version = "superagent-local#1",
+            acceptMode = com.wangzan101.mika.core.superagent.AcceptMode.Auto,
+            allowedActors = mapOf(LOCAL_SOURCE to listOf("owner")),
+        ) else loaded
+        if (policy != loaded) store.save(policy)
+        return policy
     }
 
     private fun startInForeground() {
@@ -179,7 +196,7 @@ class SuperagentRuntimeService : Service() {
             .setOngoing(true)
             .build()
         try {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } catch (_: IllegalArgumentException) {
             startForeground(NOTIFICATION_ID, notification)
         }
@@ -194,7 +211,8 @@ class SuperagentRuntimeService : Service() {
         private const val NOTIFICATION_ID = 3101
 
         fun start(context: Context) {
-            context.startForegroundService(Intent(context, SuperagentRuntimeService::class.java))
+            runCatching { context.startForegroundService(Intent(context, SuperagentRuntimeService::class.java)) }
+                .onFailure { Log.w("SuperagentRuntime", "system blocked foreground start", it) }
         }
 
         fun stop(context: Context) {

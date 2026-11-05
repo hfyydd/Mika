@@ -17,12 +17,12 @@ class StoreTest {
             triggers = listOf(trigger),
             decisions = mapOf("t1" to Decision.Accept("t1", "Work", "repo", "explicit")),
             dispositions = mapOf("t1" to disposition),
-            readPositions = mapOf("s1" to "e1"),
+            readPositions = mapOf("test:s1" to "e1"),
         ))
         val loaded = FileSuperagentStore(path).load()
         assertEquals(1, loaded.triggers.size)
         assertEquals("t1", loaded.triggers[0].id)
-        assertEquals("e1", loaded.readPositions["s1"])
+        assertEquals("e1", loaded.readPositions["test:s1"])
         assertEquals("ev1", loaded.dispositions.getValue("t1").evalId)
         assertEquals("Work", (loaded.decisions.getValue("t1") as Decision.Accept).title)
     }

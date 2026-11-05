@@ -37,7 +37,7 @@ class TelegramSource(
     override val kind = "telegram"
 
     override suspend fun poll(state: SuperagentState): List<Trigger> {
-        val cursor = state.readPositions[config.instance]?.toLongOrNull()
+        val cursor = state.readPositions["${kind}:${config.instance}"]?.toLongOrNull()
         val offset = (cursor?.plus(1) ?: 0L).takeIf { it > 0 }
         val url = buildString {
             append(config.baseUrl.trimEnd('/'))

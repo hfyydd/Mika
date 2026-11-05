@@ -19,7 +19,7 @@ fun followupOwners(
         .filter { it.threadKey == trigger.threadKey }
         .filter { it.id !in handbacked }
         .filter { it.id !in contextOnly }
-        .filter { it.ended?.by != "person" }
+        .filter { it.ended?.by !in setOf("person", "policy") }
         .map { it.id }
         .toList()
 }

@@ -32,4 +32,7 @@ interface Source {
     val kind: String
     /** 拉一批新事件;返回前事件才算收到,游标由 Engine 在入库后更新。 */
     suspend fun poll(state: SuperagentState): List<Trigger>
+
+    /** Engine 处理批次中途失败时,把未入库的剩余事件放回;默认实现用于游标型来源。 */
+    suspend fun rollback(triggers: List<Trigger>) {}
 }

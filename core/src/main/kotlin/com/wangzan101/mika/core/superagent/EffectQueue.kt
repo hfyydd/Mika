@@ -33,6 +33,23 @@ interface EffectStore {
     fun save(record: EffectRecord)
 }
 
+/** 读到坏文件先改名留证，再交给调用方决定是否从空状态恢复。 */
+fun archiveCorruptStore(path: Path) {
+    if (!Files.exists(path)) return
+    val stamp = System.currentTimeMillis().toString(36)
+    runCatching {
+        Files.move(path, path.resolveSibling("${path.fileName}.corrupt-$stamp"), StandardCopyOption.REPLACE_EXISTING)
+    }
+}
+
+/** 各存储用独立临时文件;ATOMIC_MOVE 保证读者只看到完整快照。 */
+internal fun writeAtomic(path: Path, content: String) {
+    val tmp = path.resolveSibling("${path.fileName}.${System.nanoTime()}.${path.hashCode()}.tmp")
+    Files.createDirectories(path.parent)
+    tmp.toFile().writeText(content)
+    Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+}
+
 class MemoryEffectStore(initial: List<EffectRecord> = emptyList()) : EffectStore {
     private val records = initial.associateByTo(linkedMapOf()) { it.id }
 
@@ -49,19 +66,17 @@ class FileEffectStore(private val path: Path) : EffectStore {
         return try {
             json.decodeFromString<List<EffectRecord>>(path.toFile().readText())
         } catch (_: Exception) {
+            archiveCorruptStore(path)
             emptyList()
         }
     }
 
     override fun all() = memory.all()
 
-    override fun save(record: EffectRecord) {
+    @Synchronized override fun save(record: EffectRecord) {
         memory.save(record)
         val records = memory.all()
-        val tmp = path.resolveSibling(path.fileName.toString() + ".tmp")
-        Files.createDirectories(path.parent)
-        tmp.toFile().writeText(json.encodeToString(records))
-        Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        writeAtomic(path, json.encodeToString(records))
     }
 }
 
@@ -70,24 +85,26 @@ class FileEffectStore(private val path: Path) : EffectStore {
  * 重启后 Attempting 会回到 Pending,调用方必须按 [EffectRecord.id] 幂等。
  */
 class EffectQueue(private val store: EffectStore, private val now: () -> Long = System::currentTimeMillis) {
-    private val seq = (store.all().maxOfOrNull { it.seq } ?: 0L)
+    private var nextSeq = (store.all().maxOfOrNull { it.seq } ?: 0L)
 
     fun all(): List<EffectRecord> = store.all()
 
+    @Synchronized
     fun submit(id: String, kind: EffectKind, ticketId: String, assignmentId: String = "", payload: String = ""): EffectRecord {
         store.all().firstOrNull { it.id == id }?.let { return it }
         val record = EffectRecord(
             id = id, kind = kind, ticketId = ticketId, assignmentId = assignmentId,
-            payload = payload, seq = seq + store.all().size + 1, availableAtMs = now(),
+            payload = payload, seq = ++nextSeq, availableAtMs = now(),
         )
         store.save(record)
         return record
     }
 
     /** 程序重启后的唯一恢复入口:Attempting 是上次崩溃的未知点,交给幂等 action 决定是否跳过。 */
-    fun recover() {
+    fun recover(replay: (EffectRecord) -> Boolean = { true }) {
         store.all().filter { it.state == EffectState.Attempting }.forEach {
-            store.save(it.copy(state = EffectState.Pending))
+            if (replay(it)) store.save(it.copy(state = EffectState.Pending))
+            else store.save(it.copy(state = EffectState.Done, completedAtMs = now(), receipt = "recovery:skipped"))
         }
     }
 
@@ -101,8 +118,10 @@ class EffectQueue(private val store: EffectStore, private val now: () -> Long = 
     suspend fun drain(action: suspend (EffectRecord) -> String): Int {
         var completed = 0
         while (true) {
-            val next = store.all().filter { it.state == EffectState.Pending }.minByOrNull { it.seq } ?: break
-            if (next.availableAtMs > now()) break
+            // 只跑到该批的可用行为止;别的未到期记录留在队列里,不挡这轮到期行为。
+            val next = store.all()
+                .filter { it.state == EffectState.Pending && it.availableAtMs <= now() }
+                .minByOrNull { it.seq } ?: break
             val record = next
             store.save(record.copy(state = EffectState.Attempting))
             try {

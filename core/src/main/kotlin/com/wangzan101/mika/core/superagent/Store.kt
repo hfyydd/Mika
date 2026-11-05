@@ -20,6 +20,8 @@ data class SuperagentState(
     val dispositions: Map<String, TriggerDisposition> = emptyMap(),
     /** 收件游标,按 source instance 记;重启后不重放事件。 */
     val readPositions: Map<String, String> = emptyMap(),
+    /** 来源幂等账本,不受 Trigger 窗口裁剪影响。 */
+    val seenExternalIds: Map<String, String> = emptyMap(),
     /** Observe 模式的「本会接受」记录。 */
     val observations: List<String> = emptyList(),
 )
@@ -45,14 +47,10 @@ class FileSuperagentStore(private val path: Path) : SuperagentStore {
         return try {
             json.decodeFromString<SuperagentState>(path.toFile().readText())
         } catch (_: Exception) {
+            archiveCorruptStore(path)
             SuperagentState()
         }
     }
 
-    override fun save(state: SuperagentState) {
-        val tmp = path.resolveSibling(path.fileName.toString() + ".tmp")
-        Files.createDirectories(path.parent)
-        tmp.toFile().writeText(json.encodeToString(state))
-        Files.move(tmp, path, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-    }
+    @Synchronized override fun save(state: SuperagentState) = writeAtomic(path, json.encodeToString(state))
 }

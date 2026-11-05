@@ -19,7 +19,7 @@ data class ReplyEnvelope(
 
 /** 来源回执;实现必须凭 [ReplyEnvelope] + [EffectRecord.id] 幂等。 */
 fun interface ReplyChannel {
-    suspend fun send(envelope: ReplyEnvelope): String
+    suspend fun send(envelope: ReplyEnvelope, effectId: String): String
 }
 
 /**
@@ -51,9 +51,8 @@ class SourceOutbox(
             val envelope = runCatching { json.decodeFromString<ReplyEnvelope>(record.payload) }.getOrNull() ?: continue
             val channel = channels["${envelope.source.kind}:${envelope.source.instance}"] ?: continue
             count += effects.drain { row ->
-                if (row.id != record.id) error("queue is blocked by ${row.id}")
-                if (row.state == EffectState.Done) return@drain row.receipt.ifBlank { "already:${row.id}" }
-                channel.send(envelope)
+                if (row.id != record.id) return@drain "skipped:${row.id}"
+                channel.send(envelope, record.id)
             }
         }
         return count

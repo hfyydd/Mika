@@ -48,6 +48,9 @@ class TaskHostExecutorTest {
         val report = executor.run(ticket("use the phone app"), "")
 
         assertEquals(setOf("phone"), TaskHostExecutor.mikaRunScope("use the phone app").capabilities)
+        assertEquals(true, TaskHostExecutor.mikaRunScope("analyze the latest report").readOnly)
+        assertEquals(emptySet<String>(), TaskHostExecutor.mikaRunScope("work on something unspecified").capabilities)
+        assertEquals(true, TaskHostExecutor.mikaRunScope("work on something unspecified").readOnly)
         assertEquals(ReportState.Blocked, report.state)
         assertEquals("interrupted", report.question)
     }

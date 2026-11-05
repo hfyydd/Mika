@@ -23,15 +23,15 @@ class Runner(
         effects.submit("assignment:$assignmentId", EffectKind.Assignment, ticket.id, assignmentId)
         var report: ExecutorReport? = null
         effects.drain { record ->
-            if (record.id == "assignment:$assignmentId") {
-                report = runAndReport(assignmentId, ticket)
+            // 队列里同一时刻只取本条;其它 id 由自己的调用方处理,这里不阻塞也不报错。
+            if (record.id == "assignment:$assignmentId") runAndReport(assignmentId, ticket).let {
+                report = it
                 "assignment:$assignmentId"
-            } else {
-                error("queue is blocked by ${record.id}")
-            }
+            } else "skipped:${record.id}"
         }
         report?.let { reply(assignmentId, ticket, it) }
-        return true
+        // 报告没写进 Engine 时如实返回 false,由 watchdog / 下轮恢复重派,不能假装完成。
+        return report != null
     }
 
     private suspend fun execute(assignmentId: String, ticket: Ticket): Boolean {
@@ -45,6 +45,8 @@ class Runner(
             val report = executor.run(ticket, threadSummary(engine, ticket.threadKey))
             engine.report(assignmentId, report)
             report
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             val report = ExecutorReport(ReportState.Failed, "执行失败: ${e.message ?: e::class.simpleName}")
             engine.report(assignmentId, report)
