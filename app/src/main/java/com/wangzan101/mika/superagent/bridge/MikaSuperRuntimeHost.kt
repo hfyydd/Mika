@@ -26,6 +26,9 @@ class MikaSuperRuntimeHost(context: Context) {
             override fun onStarted() { _userOn.value = true }
             override fun onStopped() { _userOn.value = false }
         })
+        _userOn.value = com.wangzan101.mika.core.superagent.FileSuperagentSettingsStore(
+            java.io.File(app.filesDir, "superagent/settings.json").toPath(),
+        ).load().enabled
     }
 
     /** 用户开关与服务 ready 同时成立才算 active。 */
